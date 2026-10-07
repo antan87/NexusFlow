@@ -95,6 +95,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   const [refineFeedback, setRefineFeedback] = useState('');
   const [symbolsOpen, setSymbolsOpen] = useState(false);
   const [realTargetLine, setRealTargetLine] = useState<number | undefined>(initialTargetLine);
+  const [realTargetOrigLine, setRealTargetOrigLine] = useState<number | undefined>(undefined);
   const [explicitSnippetTargetLine, setExplicitSnippetTargetLine] = useState<number | undefined>(undefined);
   const [jumpNonce, setJumpNonce] = useState(0);
   const editorLabel = getEditorLabel(defaultEditor);
@@ -127,6 +128,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
       lastTargetLineJumpRef.current = jumpKey;
 
       setRealTargetLine(initialTargetLine);
+      setRealTargetOrigLine(undefined);
       setExplicitSnippetTargetLine(undefined);
       setJumpNonce((n) => n + 1);
       const matchingIndex = hunks.findIndex(
@@ -166,6 +168,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   }, [explicitSnippetTargetLine, realTargetLine, fullFileContent, hunks]);
 
   const fallbackTargetLine = realTargetLine;
+  const fallbackTargetOrigLine = realTargetOrigLine;
 
   const toggleViewMode = () => {
     if (onToggleViewMode) {
@@ -183,9 +186,12 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
       const hunk = hunks[index];
       const targetModified = hunk.firstChangedLineModified ?? getHunkFirstChangedLineModified(hunk);
       const targetSnippet = hunk.firstChangedSnippetLine ?? getHunkFirstChangedSnippetLine(index, hunks);
+      const hasAdds = hunk.lines ? hunk.lines.some((l) => l.startsWith('+') && !l.startsWith('+++')) : false;
+      const targetOriginal = !hasAdds ? (hunk.firstChangedLineOriginal ?? hunk.startLineOriginal) : undefined;
 
       setActiveHunkIndex(index);
       setRealTargetLine(Math.max(1, targetModified));
+      setRealTargetOrigLine(targetOriginal);
       if (!fullFileContent) {
         setExplicitSnippetTargetLine(targetSnippet);
       } else {
@@ -254,6 +260,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
         }
       }
       setRealTargetLine(symbol.lineNumber);
+      setRealTargetOrigLine(undefined);
       setExplicitSnippetTargetLine(undefined);
       setJumpNonce((n) => n + 1);
 
@@ -572,6 +579,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             viewMode={viewMode}
             ignoreWhitespace={ignoreWhitespace}
             targetLine={fallbackTargetLine}
+            targetOrigLine={fallbackTargetOrigLine}
             jumpNonce={jumpNonce}
           />
         )}

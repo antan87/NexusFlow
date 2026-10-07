@@ -145,4 +145,30 @@ describe('PluggableDiffViewer & Diff Adapters', () => {
 
     expect(html).toContain('No diff changes recorded.');
   });
+
+  it('FallbackDiffAdapter targets and highlights pure deletions via targetOrigLine', () => {
+    const deletionPatch = [
+      '--- a/src/index.ts',
+      '+++ b/src/index.ts',
+      '@@ -20,4 +21,1 @@',
+      ' ctx 21',
+      '-deleted line 22',
+      '-deleted line 23',
+      ' ctx 22',
+    ].join('\n');
+
+    const html = renderToStaticMarkup(
+      createElement(FallbackDiffAdapter, {
+        filePath: 'src/index.ts',
+        patchText: deletionPatch,
+        targetOrigLine: 21,
+      })
+    );
+
+    // The deleted line (orig 21) is marked as target
+    expect(html).toContain('data-orig-line="21"');
+    expect(html).toContain('data-is-target="true"');
+    // Context line (mod 22) must NOT be marked as target
+    expect(html).not.toMatch(/data-mod-line="22"[^>]*data-is-target="true"/);
+  });
 });

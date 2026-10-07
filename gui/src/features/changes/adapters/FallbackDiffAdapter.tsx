@@ -7,28 +7,40 @@ import type { DiffAdapterRenderProps } from '../types.js';
 
 export interface FallbackDiffAdapterProps extends DiffAdapterRenderProps {
   targetLine?: number;
+  targetOrigLine?: number;
   jumpNonce?: number;
 }
 
 export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
   patchText,
   targetLine,
+  targetOrigLine,
   jumpNonce,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const lastJumpKeyRef = useRef<string>('');
 
   useEffect(() => {
-    if (!containerRef.current || !targetLine || targetLine <= 0) return;
-    const jumpKey = `${targetLine}:${jumpNonce ?? 0}`;
+    if (!containerRef.current) return;
+    const hasModTarget = targetLine !== undefined && targetLine > 0;
+    const hasOrigTarget = targetOrigLine !== undefined && targetOrigLine > 0;
+    if (!hasModTarget && !hasOrigTarget) return;
+
+    const jumpKey = `${targetLine ?? ''}:${targetOrigLine ?? ''}:${jumpNonce ?? 0}`;
     if (lastJumpKeyRef.current === jumpKey) return;
     lastJumpKeyRef.current = jumpKey;
 
-    const el = containerRef.current.querySelector<HTMLElement>(`[data-mod-line="${targetLine}"]`) ||
-      containerRef.current.querySelector<HTMLElement>(`[data-orig-line="${targetLine}"]`) ||
+    const el =
+      (hasOrigTarget
+        ? containerRef.current.querySelector<HTMLElement>(`[data-orig-line="${targetOrigLine}"][data-diff-marker="-"]`) ||
+          containerRef.current.querySelector<HTMLElement>(`[data-orig-line="${targetOrigLine}"]`)
+        : null) ||
+      (hasModTarget
+        ? containerRef.current.querySelector<HTMLElement>(`[data-mod-line="${targetLine}"]`)
+        : null) ||
       containerRef.current.querySelector<HTMLElement>('[data-is-target="true"]');
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [targetLine, jumpNonce]);
+  }, [targetLine, targetOrigLine, jumpNonce]);
 
   const renderedLines = useMemo(() => {
     if (!patchText || !patchText.trim()) return [];
@@ -86,10 +98,10 @@ export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
         content = line.slice(1);
       }
 
-      const isTarget = targetLine !== undefined && (
-        lineModNum === targetLine ||
-        (lineModNum === undefined && lineOrigNum === targetLine)
-      );
+      const isTarget =
+        (targetOrigLine !== undefined && lineOrigNum === targetOrigLine && lineModNum === undefined) ||
+        (targetOrigLine === undefined && targetLine !== undefined && lineModNum === targetLine) ||
+        (targetOrigLine === undefined && targetLine !== undefined && lineModNum === undefined && lineOrigNum === targetLine);
 
       return {
         idx,
@@ -103,7 +115,7 @@ export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
         textClass,
       };
     });
-  }, [patchText, targetLine]);
+  }, [patchText, targetLine, targetOrigLine]);
 
   if (!patchText || !patchText.trim()) {
     return (
@@ -127,7 +139,7 @@ export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
           data-orig-line={item.lineOrigNum}
           data-mod-line={item.lineModNum}
           data-is-target={item.isTarget ? 'true' : undefined}
-          className={`flex py-0.5 border-l-2 transition-colors hover:bg-accent/40 ${
+          className={`flex min-w-full w-fit py-0.5 border-l-2 transition-colors hover:bg-accent/40 ${
             item.isTarget
               ? 'bg-primary/25 border-primary font-bold'
               : 'border-transparent ' + item.bgClass

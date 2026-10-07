@@ -6,6 +6,7 @@ import {
   getHunkSnippetLine,
   getHunkFirstChangedSnippetLine,
   getHunkFirstChangedLineModified,
+  getHunkFirstChangedLineOriginal,
 } from './diffParser.ts';
 
 const SAMPLE_PATCH = `--- a/src/calc.ts
@@ -158,6 +159,8 @@ test('parseUnifiedDiff correctly targets first change in pure deletions and imme
   // In snippet buffer: hunk 0 took lines 1..3 (import, line 1, line 2), so hunk 1 starts at 4 (ctx 21).
   // First change deletion is at snippet line 5.
   assert.equal(h1.firstChangedSnippetLine, 5);
+  assert.equal(getHunkFirstChangedSnippetLine(0, result.hunks), 1);
   assert.equal(getHunkFirstChangedSnippetLine(1, result.hunks), 5);
+  assert.equal(getHunkFirstChangedLineOriginal(h1), 21);
 });
 

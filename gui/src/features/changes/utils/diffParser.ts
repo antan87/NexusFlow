@@ -258,4 +258,31 @@ export function getHunkFirstChangedLineModified(hunk: DiffHunkAction): number {
   return hunk.startLineModified;
 }
 
+export const getFirstChangedLineModified = getHunkFirstChangedLineModified;
+
+/**
+ * Returns the first changed original line number for a hunk.
+ * Falls back to startLineOriginal if no changes are detected.
+ */
+export function getHunkFirstChangedLineOriginal(hunk: DiffHunkAction): number {
+  if (hunk.firstChangedLineOriginal !== undefined) {
+    return hunk.firstChangedLineOriginal;
+  }
+  let curOrig = hunk.startLineOriginal;
+  for (const line of hunk.lines || []) {
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      return curOrig;
+    }
+    if (line.startsWith('-') && !line.startsWith('---')) {
+      return curOrig;
+    }
+    if (line.startsWith(' ')) {
+      curOrig++;
+    }
+  }
+  return hunk.startLineOriginal;
+}
+
+export const getFirstChangedLineOriginal = getHunkFirstChangedLineOriginal;
+
 
