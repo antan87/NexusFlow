@@ -16,6 +16,7 @@ import { apiFetch } from '../../lib/api/client.js';
 import { clipboardHtmlToText, readClipboardText, safeCopyToClipboard } from '../../lib/clipboard.js';
 import { terminalRequest, terminalToken, terminalSocketUrl, type TerminalInfo, type TerminalLaunch, type TerminalStatus } from './client.js';
 import { findFileReferences, type FileReference } from './fileReferences.js';
+import { findWebLinks } from './webLinks.js';
 import { toPromptText } from './promptFill.js';
 import { SHIFT_ENTER_SEQUENCE, terminalKeyAction } from './terminalKeys.js';
 import type { AISession } from '../../types.js';
@@ -258,18 +259,18 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
           return true;
       }
     });
-    const links = term.registerLinkProvider({ provideLinks(bufferLineNumber, callback) {
+    const getWindowedRows = (bufferLineNumber: number) => {
       const buffer = term.buffer.active;
       let first = bufferLineNumber - 1;
       while (first > 0 && buffer.getLine(first)?.isWrapped && bufferLineNumber - first <= 20) first--;
-      if (buffer.getLine(first)?.isWrapped) { callback([]); return; }
+      if (buffer.getLine(first)?.isWrapped) return null;
       let last = bufferLineNumber - 1;
       while (buffer.getLine(last + 1)?.isWrapped && last - first < 20) last++;
-      if (buffer.getLine(last + 1)?.isWrapped) { callback([]); return; }
+      if (buffer.getLine(last + 1)?.isWrapped) return null;
       const rows: { line: IBufferLine; text: string }[] = [];
       for (let at = first; at <= last; at++) {
         const line = buffer.getLine(at);
-        if (!line) { callback([]); return; }
+        if (!line) return null;
         rows.push({ line, text: line.translateToString(at === last) });
       }
       const positionAt = (offset: number, ending: boolean) => {
@@ -286,9 +287,25 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
         }
         return { x: 1, y: first + 1 };
       };
-      callback(findFileReferences(rows.map(row => row.text).join('')).map(reference => ({
+      return { rows, text: rows.map(r => r.text).join(''), positionAt };
+    };
+    const webLinks = term.registerLinkProvider({ provideLinks(bufferLineNumber, callback) {
+      const windowed = getWindowedRows(bufferLineNumber);
+      if (!windowed) { callback([]); return; }
+      callback(findWebLinks(windowed.text).map(link => ({
+        text: link.text,
+        range: { start: windowed.positionAt(link.start, false), end: windowed.positionAt(link.end, true) },
+        activate: () => {
+          window.open(link.url, '_blank', 'noopener,noreferrer');
+        },
+      })));
+    } });
+    const links = term.registerLinkProvider({ provideLinks(bufferLineNumber, callback) {
+      const windowed = getWindowedRows(bufferLineNumber);
+      if (!windowed) { callback([]); return; }
+      callback(findFileReferences(windowed.text).map(reference => ({
         text: reference.text,
-        range: { start: positionAt(reference.start, false), end: positionAt(reference.end, true) },
+        range: { start: windowed.positionAt(reference.start, false), end: windowed.positionAt(reference.end, true) },
         activate: () => openFileRef.current?.({ path: reference.path, line: reference.line }),
       })));
     } });
@@ -316,7 +333,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       }
     });
     observer.observe(host.current);
-    return () => { terminalHost.removeEventListener('keydown', onPasteShortcut, true); terminalHost.removeEventListener('paste', onPaste, true); observer.disconnect(); links.dispose(); input.dispose(); resize.dispose(); term.dispose(); renderer.current = null; };
+    return () => { terminalHost.removeEventListener('keydown', onPasteShortcut, true); terminalHost.removeEventListener('paste', onPaste, true); observer.disconnect(); webLinks.dispose(); links.dispose(); input.dispose(); resize.dispose(); term.dispose(); renderer.current = null; };
   }, [send]);
   useEffect(() => {
     if (!active || !terminal) return;

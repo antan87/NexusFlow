@@ -226,7 +226,6 @@ export function WorkspaceCodePanel({
 
   useEffect(() => {
     if (openReference && openReference.id !== handledReference.current) {
-      setMode('files');
       if (searchQuery) {
         setSearchQuery('');
       }
@@ -272,7 +271,8 @@ export function WorkspaceCodePanel({
     // file reference needs the full result.
     const key = `${base}|${mode}|${openReference?.id ?? ''}`;
     const known = knownListing.current?.key === key ? knownListing.current.token : null;
-    const params = new URLSearchParams(mode === 'files' ? { include: 'all' } : {});
+    const needAll = mode === 'files' || !!(openReference && openReference.id !== handledReference.current);
+    const params = new URLSearchParams(needAll ? { include: 'all' } : {});
     if (known) params.set('known', known);
     const query = params.toString();
     void apiFetch<{ changes?: CodeRepo[]; unchanged?: boolean; token?: string }>(`${base}/changes${query ? `?${query}` : ''}`)
@@ -287,14 +287,19 @@ export function WorkspaceCodePanel({
           }
           return result.changes;
         });
-        if (mode === 'files' && openReference && openReference.id !== handledReference.current) {
+        if (openReference && openReference.id !== handledReference.current) {
           handledReference.current = openReference.id;
           const resolved = resolveFileReference(openReference.path, result.changes);
-          setReferenceError(resolved.error ?? '');
-          setDiff(null);
-          scrolledSelectionKey.current = '';
-          setRevealKey(k => k + 1);
-          setSelection(resolved.file ? { ...resolved.file, line: openReference.line } : null);
+          if (resolved.file) {
+            setMode('files');
+            setReferenceError('');
+            setDiff(null);
+            scrolledSelectionKey.current = '';
+            setRevealKey(k => k + 1);
+            setSelection({ ...resolved.file, line: openReference.line });
+          } else {
+            setReferenceError(resolved.error ?? '');
+          }
         } else {
           setSelection(current =>
             current && result.changes.some(repo => repo.repoName === current.repoName && repo.files.some(file => file.file === current.file))

@@ -46,6 +46,19 @@ describe('WorkspaceCodePanel Toolbar Actions', () => {
 
     expect(html).toContain('title="Close code panel"');
   });
+
+  it('does not eagerly switch to files mode when openReference is provided without resolution', () => {
+    const html = renderToStaticMarkup(
+      createElement(WorkspaceCodePanel, {
+        workspace: 'test-ws',
+        active: true,
+        openReference: { path: 'nonexistent/file.ts', id: 1 },
+      })
+    );
+
+    expect(html).toContain('aria-pressed="true">Changes</button>');
+    expect(html).toContain('aria-pressed="false">Files</button>');
+  });
 });
 
 describe('WorkspaceCodePanel Expansion & Polling State Management', () => {

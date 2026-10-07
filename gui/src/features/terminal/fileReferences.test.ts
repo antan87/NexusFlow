@@ -23,4 +23,32 @@ describe('terminal file references', () => {
       { path: 'src/other file.ts', line: 3 },
     ]);
   });
+
+  it('strips angle brackets and ignores angle-wrapped URLs', () => {
+    const found = findFileReferences('check <src/app.ts:15> and <https://example.com/docs> and <http://localhost:3000>');
+    expect(found.map(({ text, path, line }) => ({ text, path, line }))).toEqual([
+      { text: 'src/app.ts:15', path: 'src/app.ts', line: 15 },
+    ]);
+  });
+
+  it('strips markdown link syntax and ignores markdown web links', () => {
+    const found = findFileReferences('refer to [guide](src/guide.md:20) and [docs](https://example.com) and [repo](github.com/foo/bar)');
+    expect(found.map(({ text, path, line }) => ({ text, path, line }))).toEqual([
+      { text: 'src/guide.md:20', path: 'src/guide.md', line: 20 },
+    ]);
+  });
+
+  it('handles angle-wrapped URLs inside markdown link syntax', () => {
+    const found = findFileReferences('see [source](<src/components/Header.tsx:42>) and [link](<https://foo.com>)');
+    expect(found.map(({ text, path, line }) => ({ text, path, line }))).toEqual([
+      { text: 'src/components/Header.tsx:42', path: 'src/components/Header.tsx', line: 42 },
+    ]);
+  });
+
+  it('filters out web domains, localhost, IPs, and mailto', () => {
+    const found = findFileReferences('links: github.com/mrpatronz/nexusflow example.com:8080 localhost:3000/api 127.0.0.1:8080/index.html mailto:dev@example.com README.md:5');
+    expect(found.map(({ path, line }) => ({ path, line }))).toEqual([
+      { path: 'README.md', line: 5 },
+    ]);
+  });
 });

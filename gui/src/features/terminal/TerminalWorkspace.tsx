@@ -8,6 +8,8 @@ import { WorkspaceCodePanel } from '../changes/WorkspaceCodePanel.js';
 import { SessionDeck } from './SessionDeck.js';
 import { WorkspaceDocumentsInspector } from './WorkspaceDocumentsInspector.js';
 import { isUnreadableDocument, workspaceDocumentName } from './documentReference.js';
+import { isPathInsideWorkspace, isWebOrDomain, normalizeWebUrl } from './webLinks.js';
+import { resolveFileReference } from '../changes/resolveFileReference.js';
 import { WhereAreWeStrip } from '../progress/WhereAreWeStrip.js';
 
 /** The inspector may never squeeze the terminal below this share of the pane. */
@@ -96,8 +98,21 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<C
   }, []);
 
   const openFile = async (reference: { path: string; line?: number }) => {
+    const cleanPath = reference.path.replace(/^<+|>+$/g, '').trim();
+    if (!cleanPath) return;
+
+    if (isWebOrDomain(cleanPath)) {
+      window.open(normalizeWebUrl(cleanPath), '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    if (!isPathInsideWorkspace(cleanPath, workspacePath, repoPaths)) {
+      return;
+    }
+
     const request = ++referenceRequest.current;
-    const name = workspaceDocumentName(reference, workspacePath, repoPaths);
+    const cleanRef = { ...reference, path: cleanPath };
+    const name = workspaceDocumentName(cleanRef, workspacePath, repoPaths);
     if (name) {
       const nested = name.includes('/');
       const documents = `/api/workspace/${encodeURIComponent(props.workspace)}/documents`;
@@ -119,8 +134,25 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<C
         return;
       }
     }
+
+    try {
+      const changesRes = await apiFetch<{ changes?: { repoName: string; repoPath: string; files: { file: string }[] }[] }>(
+        `/api/workspace/${encodeURIComponent(props.workspace)}/changes?include=all`
+      );
+      if (request !== referenceRequest.current) return;
+      const repos = changesRes?.changes;
+      if (repos && repos.length > 0) {
+        const resolved = resolveFileReference(cleanPath, repos);
+        if (!resolved.file) {
+          return;
+        }
+      }
+    } catch {
+      return;
+    }
+
     if (request !== referenceRequest.current) return;
-    setOpenReference(current => ({ ...reference, id: (current?.id ?? 0) + 1 }));
+    setOpenReference(current => ({ ...cleanRef, id: (current?.id ?? 0) + 1 }));
     setInspector('code');
   };
 
