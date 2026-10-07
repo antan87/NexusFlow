@@ -1097,6 +1097,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                               onKeyDown={e => {
                                 if (e.key === 'Enter' || e.key === ' ') {
                                   e.preventDefault();
+                                  e.stopPropagation();
                                   const idx = treeOrderedFiles.findIndex(
                                     f => f.repoName === repo.repoName && (f.file === fileInfo.file || normalizePath(f.file) === normalizePath(fileInfo.file))
                                   );

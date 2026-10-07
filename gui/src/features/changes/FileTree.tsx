@@ -273,11 +273,12 @@ export function getVisibleTreeRows<T extends TreeFile>(
     }
     for (const file of node.files) {
       const norm = normalizePath(file.file);
+      const fileName = norm.split('/').filter(Boolean).at(-1) ?? norm;
       result.push({
         type: 'file',
         id: `file:${norm}`,
         path: norm,
-        name: file.file.split('/').filter(Boolean).at(-1) ?? file.file,
+        name: fileName,
         parentPath,
       });
     }
@@ -426,7 +427,14 @@ export function FileTree<T extends TreeFile>({
   // Uncontrolled state when expandedPaths prop is not provided
   const [internalExpandedPaths, setInternalExpandedPaths] = useState<Set<string>>(() => {
     if (searchQuery && searchQuery.trim()) return new Set(allPaths);
-    return defaultExpanded ? new Set(allPaths) : new Set();
+    const initial = defaultExpanded ? new Set(allPaths) : new Set<string>();
+    const initialTarget = revealPath ?? selectedPath;
+    if (initialTarget) {
+      for (const a of getAncestorPaths(root, initialTarget)) {
+        initial.add(a);
+      }
+    }
+    return initial;
   });
 
   // Auto-expand all matching branches when search query is entered in uncontrolled mode
@@ -503,9 +511,11 @@ export function FileTree<T extends TreeFile>({
   );
 
   // Auto-expand parent/ancestor folders when a file is revealed or selected
+  const targetPath = revealPath ?? selectedPath;
+
   useEffect(() => {
-    if (!revealPath) return;
-    const ancestors = getAncestorPaths(root, revealPath);
+    if (!targetPath) return;
+    const ancestors = getAncestorPaths(root, targetPath);
     if (ancestors.length > 0) {
       setExpandedPaths(prev => {
         let changed = false;
@@ -519,12 +529,12 @@ export function FileTree<T extends TreeFile>({
         return changed ? next : prev;
       });
     }
-  }, [revealPath, revealKey, root, setExpandedPaths]);
+  }, [targetPath, revealKey, root, setExpandedPaths]);
 
   // Smoothly scroll the selected/revealed file button into view in the sidebar
   useEffect(() => {
-    if (!revealPath) return;
-    const normalized = normalizePath(revealPath);
+    if (!targetPath) return;
+    const normalized = normalizePath(targetPath);
     const items = host.current?.querySelectorAll<HTMLElement>('[data-file-path]');
     for (const item of items ?? []) {
       if (item.dataset.filePath === normalized) {
@@ -537,15 +547,17 @@ export function FileTree<T extends TreeFile>({
         break;
       }
     }
-  }, [revealPath, revealKey, currentExpandedPaths]);
+  }, [targetPath, revealKey, currentExpandedPaths]);
 
   // Track focused row for roving tabindex
   const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!revealPath) return;
-    setFocusedRowId(`file:${normalizePath(revealPath)}`);
-  }, [revealPath, revealKey]);
+    if (!targetPath) return;
+    const norm = normalizePath(targetPath);
+    const isDir = allPaths.includes(norm);
+    setFocusedRowId(isDir ? `dir:${norm}` : `file:${norm}`);
+  }, [targetPath, revealKey, allPaths]);
 
   const visibleRows = useMemo(
     () => getVisibleTreeRows(root, currentExpandedPaths),
@@ -584,6 +596,14 @@ export function FileTree<T extends TreeFile>({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+
       const key = e.key;
       if (!['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft', 'Home', 'End', 'Enter', ' '].includes(key)) {
         return;
@@ -621,10 +641,14 @@ export function FileTree<T extends TreeFile>({
       if (action.type === 'focus') {
         focusRow(action.targetRow);
       } else if (action.type === 'toggle') {
+        setFocusedRowId(currentRow.id);
         togglePath(action.path);
       } else if (action.type === 'activate') {
-        const target = findFileTarget(host.current, action.path);
-        target?.click();
+        setFocusedRowId(currentRow.id);
+        const fileTarget = findFileTarget(host.current, action.path);
+        if (fileTarget && e.target !== fileTarget && !fileTarget.contains(e.target as Node)) {
+          fileTarget.click();
+        }
       }
     },
     [visibleRows, activeRowId, focusRow, togglePath]
@@ -640,8 +664,8 @@ export function FileTree<T extends TreeFile>({
       const props = rendered.props as Record<string, any>;
       return cloneElement(rendered as React.ReactElement<any>, {
         tabIndex: meta.tabIndex,
-        'data-tree-row': 'file',
         'data-file-path': normalizedFilePath,
+        'data-tree-row': 'file',
         ...(props['aria-selected'] === undefined
           ? { 'aria-selected': meta.isSelected }
           : {}),

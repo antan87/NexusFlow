@@ -1534,7 +1534,74 @@ describe('Roving Tabindex Behavior', () => {
     const upAction = computeTreeKeyNavigation('ArrowUp', visible[1], visible);
     expect(upAction).toEqual({ type: 'focus', targetRow: visible[0] });
   });
+
+  it('normalizes Windows backslashes to extract proper file names in getVisibleTreeRows', () => {
+    const winFiles: TreeFile[] = [
+      { file: 'src\\components\\ui\\Modal.tsx' },
+    ];
+    const root = buildCompactedTree(winFiles);
+    const visible = getVisibleTreeRows(root, new Set(['src/components/ui']));
+    expect(visible).toEqual([
+      {
+        type: 'folder',
+        id: 'dir:src/components/ui',
+        path: 'src/components/ui',
+        name: 'src/components/ui',
+        parentPath: null,
+        isExpanded: true,
+      },
+      {
+        type: 'file',
+        id: 'file:src/components/ui/Modal.tsx',
+        path: 'src/components/ui/Modal.tsx',
+        name: 'Modal.tsx',
+        parentPath: 'src/components/ui',
+      },
+    ]);
+  });
+
+  it('auto-expands ancestor directories when selectedPath is provided without revealPath', () => {
+    const html = renderToStaticMarkup(
+      createElement(FileTree, {
+        files: sampleFiles,
+        renderFile: renderFileMock,
+        label: 'Selected path without revealPath',
+        selectedPath: 'src/components/Button.tsx',
+        defaultExpanded: false,
+      })
+    );
+
+    // Parent folder 'src' and 'src/components' are auto-expanded
+    expect(html).toContain('data-path="src"');
+    expect(html).toContain('data-file-path="src/components/Button.tsx"');
+    expect(html).toContain('tabindex="0" data-file-path="src/components/Button.tsx"');
+  });
+
+  it('preserves roving tabindex without focus loss during repeated directory toggle', () => {
+    const root = buildCompactedTree(sampleFiles);
+    const expanded = new Set(['src']);
+    let visible = getVisibleTreeRows(root, expanded);
+
+    // Initial visible rows: src, src/components, src/utils, README.md
+    expect(visible.map(r => r.id)).toContain('dir:src/components');
+
+    // Toggle src/components open
+    expanded.add('src/components');
+    visible = getVisibleTreeRows(root, expanded);
+    expect(visible.map(r => r.id)).toContain('file:src/components/Button.tsx');
+
+    // Active row on src/components is preserved
+    const componentsRow = visible.find(r => r.id === 'dir:src/components');
+    expect(componentsRow).toBeDefined();
+
+    // Toggle src/components closed
+    expanded.delete('src/components');
+    visible = getVisibleTreeRows(root, expanded);
+    expect(visible.map(r => r.id)).not.toContain('file:src/components/Button.tsx');
+    expect(visible.map(r => r.id)).toContain('dir:src/components');
+  });
 });
+
 
 
 

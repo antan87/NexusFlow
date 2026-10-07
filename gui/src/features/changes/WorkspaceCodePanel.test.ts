@@ -672,7 +672,7 @@ describe('WorkspaceCodePanel Multi-Repo Keyboard & Arrow Navigation Model', () =
     expect(backendHtml).toContain('aria-selected="true"');
   });
 
-  it('dispatches goToNextFile and goToPrevFile on Alt+ArrowDown and Alt+ArrowUp hotkeys', () => {
+  it('dispatches goToNextFile and goToPrevFile on Alt+ArrowDown and Alt+ArrowUp hotkeys while ignoring bare arrows', () => {
     let currentIndex = 1;
     const goToNextFile = () => {
       if (currentIndex < visualFiles.length - 1) currentIndex++;
@@ -681,20 +681,34 @@ describe('WorkspaceCodePanel Multi-Repo Keyboard & Arrow Navigation Model', () =
       if (currentIndex > 0) currentIndex--;
     };
 
-    const handleKey = (key: string, altKey: boolean) => {
-      if (!altKey) return;
-      if (key === 'ArrowDown' || key === 'Down') goToNextFile();
-      else if (key === 'ArrowUp' || key === 'Up') goToPrevFile();
+    // Hotkey handler matching WorkspaceCodePanel pane hotkey logic
+    const handleKey = (key: string, altKey: boolean, ctrlKey = false, metaKey = false) => {
+      if (!altKey || metaKey || ctrlKey) return false;
+      if (key === 'ArrowDown' || key === 'Down') {
+        goToNextFile();
+        return true;
+      }
+      if (key === 'ArrowUp' || key === 'Up') {
+        goToPrevFile();
+        return true;
+      }
+      return false;
     };
 
-    handleKey('ArrowDown', true);
+    // Alt+ArrowDown moves to next file
+    expect(handleKey('ArrowDown', true)).toBe(true);
     expect(currentIndex).toBe(2);
 
-    handleKey('ArrowUp', true);
+    // Alt+ArrowUp moves to prev file
+    expect(handleKey('ArrowUp', true)).toBe(true);
     expect(currentIndex).toBe(1);
 
-    // Without altKey: no movement
-    handleKey('ArrowDown', false);
+    // Bare arrow keys do NOT trigger cross-repo file navigation (reserved for in-tree traversal)
+    expect(handleKey('ArrowDown', false)).toBe(false);
+    expect(currentIndex).toBe(1);
+
+    // Modifier combos with Ctrl/Meta do NOT trigger cross-repo file navigation
+    expect(handleKey('ArrowDown', true, true, false)).toBe(false);
     expect(currentIndex).toBe(1);
   });
 
