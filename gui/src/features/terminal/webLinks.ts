@@ -78,9 +78,9 @@ export function isWebOrDomain(raw: string): boolean {
   if (parts.length >= 2) {
     const tld = parts[parts.length - 1];
     // If the TLD is also a known file extension (like .md, .sh, .py, .rs),
-    // it is only a web link if it has a trailing path or port (e.g. docs.rs/tokio)
-    const hasPathOrPort = /[:/?#]/.test(first.raw);
-    if (FILE_EXTS.has(tld) && !hasPathOrPort) {
+    // it is only a web link if it has a trailing path or query (e.g. docs.rs/tokio)
+    const hasPath = /[/?]/.test(first.raw);
+    if (FILE_EXTS.has(tld) && !hasPath) {
       return false;
     }
     return true;

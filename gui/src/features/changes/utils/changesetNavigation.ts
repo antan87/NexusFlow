@@ -66,3 +66,15 @@ export function findChangedFileIndex(
 export function repoDirName(repoPath: string): string {
   return toSlashes(repoPath).replace(/\/+$/, '').split('/').pop() ?? '';
 }
+
+/**
+ * Generate a collision-resistant DOM ID for a file card in ChangesViewer.
+ * Preserves distinct delimiters (-, ., /, _) so files like foo-bar.ts, foo.bar.ts,
+ * and foo/bar.ts do not collide with each other.
+ */
+export function getFileDomId(repoName: string, filePath: string): string {
+  const sanitize = (str: string) =>
+    str.replace(/[^a-zA-Z0-9_./-]/g, (ch) => `_${ch.charCodeAt(0).toString(16)}_`);
+  return `file-diff--${sanitize(repoName)}--${sanitize(filePath)}`;
+}
+

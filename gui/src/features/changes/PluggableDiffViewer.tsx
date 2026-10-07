@@ -88,7 +88,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   const [refineModalOpen, setRefineModalOpen] = useState(false);
   const [refineFeedback, setRefineFeedback] = useState('');
   const [symbolsOpen, setSymbolsOpen] = useState(false);
-  const [targetLine, setTargetLine] = useState<number | undefined>(initialTargetLine);
+  const [realTargetLine, setRealTargetLine] = useState<number | undefined>(initialTargetLine);
   const [jumpNonce, setJumpNonce] = useState(0);
   const editorLabel = getEditorLabel(defaultEditor);
 
@@ -111,7 +111,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
     ));
   }, [repoName, filePath, fullFileContent, parsed.modifiedContent, hunks, repoPath, preExtractedSymbols]);
 
-  // If initialTargetLine changes from parent, sync targetLine and active hunk without jumping back on background diff updates
+  // If initialTargetLine changes from parent, sync realTargetLine and active hunk
   const lastTargetLineJumpRef = useRef<string>('');
   useEffect(() => {
     if (initialTargetLine && initialTargetLine > 0) {
@@ -119,14 +119,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
       if (lastTargetLineJumpRef.current === jumpKey) return;
       lastTargetLineJumpRef.current = jumpKey;
 
-      let targetJumpLine = initialTargetLine;
-      if (!fullFileContent) {
-        const snippetLine = mapRealLineToSnippetLine(initialTargetLine, hunks);
-        if (snippetLine !== null) {
-          targetJumpLine = snippetLine;
-        }
-      }
-      setTargetLine(targetJumpLine);
+      setRealTargetLine(initialTargetLine);
       setJumpNonce((n) => n + 1);
       const matchingIndex = hunks.findIndex(
         (h) =>
@@ -137,7 +130,37 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
         setActiveHunkIndex(matchingIndex);
       }
     }
-  }, [initialTargetLine, filePath, hunks, fullFileContent]);
+  }, [initialTargetLine, filePath, hunks]);
+
+  // When !fullFileContent, map real line numbers to snippet lines for MonacoDiffAdapter,
+  // while FallbackDiffAdapter receives real line numbers (matching its data-mod-line attributes).
+  const monacoTargetLine = useMemo(() => {
+    if (!realTargetLine || realTargetLine <= 0) return undefined;
+    if (fullFileContent) return realTargetLine;
+    const snippetLine = mapRealLineToSnippetLine(realTargetLine, hunks);
+    if (snippetLine !== null) {
+      return snippetLine;
+    }
+    // If realTargetLine falls on a hunk without additions/context (e.g. pure deletion),
+    // find the snippet start position for that hunk
+    const hunkIdx = hunks.findIndex(
+      (h) =>
+        realTargetLine >= h.startLineModified &&
+        realTargetLine <= h.startLineModified + Math.max(h.lineCountModified, 1) - 1
+    );
+    if (hunkIdx !== -1) {
+      let snippetPos = 1;
+      for (let i = 0; i < hunkIdx; i++) {
+        for (const l of hunks[i].lines || []) {
+          if (l.startsWith(' ') || l.startsWith('+')) snippetPos++;
+        }
+      }
+      return snippetPos;
+    }
+    return undefined;
+  }, [realTargetLine, fullFileContent, hunks]);
+
+  const fallbackTargetLine = realTargetLine;
 
   const toggleViewMode = () => {
     if (onToggleViewMode) {
@@ -153,7 +176,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   const handleSelectHunk = useCallback((index: number) => {
     if (index >= 0 && index < hunks.length && hunks[index]) {
       setActiveHunkIndex(index);
-      setTargetLine(Math.max(1, hunks[index].startLineModified));
+      setRealTargetLine(Math.max(1, hunks[index].startLineModified));
       setJumpNonce((n) => n + 1);
     }
   }, [hunks]);
@@ -208,18 +231,15 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   const handleSymbolSelect = (symbol: ChangesetSymbol) => {
     const cleanCurrent = filePath.replace(/\\/g, '/').replace(/^\//, '');
     if (symbol.filePath === cleanCurrent) {
-      let targetJumpLine = symbol.lineNumber;
       if (!fullFileContent) {
         const snippetLine = mapRealLineToSnippetLine(symbol.lineNumber, hunks);
-        if (snippetLine !== null) {
-          targetJumpLine = snippetLine;
-        } else {
+        if (snippetLine === null) {
           showToast?.(`"${symbol.name}" is outside diff hunks (line ${symbol.lineNumber})`, 'info');
           openInVsCodeAtLine(repoPath, filePath, symbol.lineNumber, symbol.column, defaultEditor);
           return;
         }
       }
-      setTargetLine(targetJumpLine);
+      setRealTargetLine(symbol.lineNumber);
       setJumpNonce((n) => n + 1);
 
       // Synchronize active hunk with target symbol
@@ -239,15 +259,37 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   };
 
   const handleLineSelect = useCallback((line: number) => {
-    const matchingIndex = hunks.findIndex(
-      (h) =>
-        line >= h.startLineModified &&
-        line <= h.startLineModified + Math.max(h.lineCountModified, 1) - 1
-    );
-    if (matchingIndex !== -1 && matchingIndex !== activeHunkIndex) {
-      setActiveHunkIndex(matchingIndex);
+    if (fullFileContent) {
+      const matchingIndex = hunks.findIndex(
+        (h) =>
+          line >= h.startLineModified &&
+          line <= h.startLineModified + Math.max(h.lineCountModified, 1) - 1
+      );
+      if (matchingIndex !== -1 && matchingIndex !== activeHunkIndex) {
+        setActiveHunkIndex(matchingIndex);
+      }
+    } else {
+      // In snippet view, line is a snippet line. Find which hunk spans this snippet line.
+      let snippetPos = 1;
+      for (let i = 0; i < hunks.length; i++) {
+        const hunk = hunks[i];
+        let hunkModifiedCount = 0;
+        for (const l of hunk.lines || []) {
+          if (l.startsWith(' ') || l.startsWith('+')) {
+            hunkModifiedCount++;
+          }
+        }
+        const hunkEndSnippet = snippetPos + Math.max(hunkModifiedCount, 1) - 1;
+        if (line >= snippetPos && line <= hunkEndSnippet) {
+          if (i !== activeHunkIndex) {
+            setActiveHunkIndex(i);
+          }
+          break;
+        }
+        snippetPos += hunkModifiedCount;
+      }
     }
-  }, [hunks, activeHunkIndex]);
+  }, [hunks, activeHunkIndex, fullFileContent]);
 
   useEffect(() => {
     if (!tabsContainerRef.current) return;
@@ -472,7 +514,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
           <ChangesetSymbolNavigator
             symbols={displayedSymbols}
             activeFilePath={filePath}
-            activeLine={targetLine || (currentHunk ? currentHunk.startLineModified : undefined)}
+            activeLine={realTargetLine || (currentHunk ? currentHunk.startLineModified : undefined)}
             editorLabel={editorLabel}
             onSelectSymbol={handleSymbolSelect}
             onOpenInVsCode={(s) => {
@@ -498,7 +540,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             viewMode={viewMode}
             ignoreWhitespace={ignoreWhitespace}
             height={fillContainer ? '100%' : 460}
-            targetLine={targetLine}
+            targetLine={monacoTargetLine}
             jumpNonce={jumpNonce}
             onOpenFile={onOpenFile}
             onLineSelect={handleLineSelect}
@@ -513,7 +555,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             patchText={patchText}
             viewMode={viewMode}
             ignoreWhitespace={ignoreWhitespace}
-            targetLine={targetLine}
+            targetLine={fallbackTargetLine}
             jumpNonce={jumpNonce}
           />
         )}

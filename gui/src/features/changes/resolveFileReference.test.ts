@@ -19,4 +19,16 @@ describe('workspace file reference resolution', () => {
     ];
     expect(resolveFileReference('src/shared.ts', repos).error).toContain('more than one');
   });
+
+  it('strips line anchors and section anchors before matching workspace files', () => {
+    const repos = [
+      { repoName: 'myrepo', repoPath: '/work/myrepo', files: [{ file: 'src/index.ts' }, { file: 'README.md' }] },
+    ];
+    expect(resolveFileReference('src/index.ts#L42', repos).file?.file).toBe('src/index.ts');
+    expect(resolveFileReference('src/index.ts#L10-L20', repos).file?.file).toBe('src/index.ts');
+    expect(resolveFileReference('/work/myrepo/src/index.ts#L50', repos).file?.file).toBe('src/index.ts');
+    expect(resolveFileReference('file:///work/myrepo/src/index.ts#L15', repos).file?.file).toBe('src/index.ts');
+    expect(resolveFileReference('README.md#getting-started', repos).file?.file).toBe('README.md');
+    expect(resolveFileReference('/work/myrepo/README.md#faq', repos).file?.file).toBe('README.md');
+  });
 });

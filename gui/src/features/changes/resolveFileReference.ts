@@ -4,6 +4,11 @@ export interface ResolvedFile { repoName: string; repoPath: string; file: string
 
 export function resolveFileReference(path: string, repos: Repo[]): { file?: ResolvedFile; error?: string } {
   let cleaned = path.replace(/^<+|>+$/g, '').trim();
+  cleaned = cleaned
+    .replace(/:(\d+)(?::\d+)?$/, '')
+    .replace(/\((\d+)(?:,\d+)?\)$/, '')
+    .replace(/#.*$/, '');
+
   if (/^file:\/\//i.test(cleaned)) {
     try {
       cleaned = decodeURIComponent(new URL(cleaned).pathname).replace(/^\/([a-z]:\/)/i, '$1');
@@ -11,6 +16,7 @@ export function resolveFileReference(path: string, repos: Repo[]): { file?: Reso
       cleaned = cleaned.replace(/^file:\/\//i, '');
     }
   }
+  cleaned = cleaned.replace(/#.*$/, '');
   const normalized = cleaned.replaceAll('\\', '/').replace(/^\.\//, '');
   const absolute = normalized.startsWith('/') || /^[a-z]:\//i.test(normalized);
   const caseInsensitive = /^[a-z]:\//i.test(normalized) || normalized.startsWith('//');

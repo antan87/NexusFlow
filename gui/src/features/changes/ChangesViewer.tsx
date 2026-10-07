@@ -48,7 +48,7 @@ import {
 import { parseUnifiedDiff } from './utils/diffParser.js';
 import { cacheKeyFor, changeVersion, diffCacheDelta, type FetchedFile } from './utils/changeVersion.js';
 import { omittedNotice, type OmittedContent } from './utils/omittedContent.js';
-import { findChangedFileIndex, isAbsoluteReference, repoDirName } from './utils/changesetNavigation.js';
+import { findChangedFileIndex, getFileDomId, isAbsoluteReference, repoDirName } from './utils/changesetNavigation.js';
 import { disposeChangesetModelsAfterEditors } from './utils/changesetModelStore.js';
 import { openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
 import { useConfig } from '../../lib/api/queries.js';
@@ -506,15 +506,43 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
     [expandedFiles, diffCache, loadDiff, versionOf]
   );
 
-  // Jump to a specific file in the changeset and optionally reveal a line
-  const jumpToFile = useCallback(
-    async (index: number, line?: number) => {
-      if (index < 0 || index >= treeOrderedFiles.length) return;
-      setSelectedFileIndex(index);
-      const target = treeOrderedFiles[index];
-      setRevealFile(`${target.repoName}/${target.file}`);
-      setRevealKey(value => value + 1);
+  const pendingScrollIdRef = useRef<string | null>(null);
+
+  const scrollToElement = useCallback((domId: string, maxAttempts = 25, intervalMs = 40) => {
+    pendingScrollIdRef.current = domId;
+    let attempts = 0;
+
+    const raf = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'
+      ? window.requestAnimationFrame
+      : (cb: FrameRequestCallback) => setTimeout(cb, 16) as unknown as number;
+
+    const poll = () => {
+      if (pendingScrollIdRef.current !== domId) return;
+      const elem = document.getElementById(domId);
+      if (elem) {
+        elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        pendingScrollIdRef.current = null;
+        return;
+      }
+      attempts++;
+      if (attempts < maxAttempts) {
+        setTimeout(() => {
+          raf(poll);
+        }, intervalMs);
+      }
+    };
+
+    raf(poll);
+  }, []);
+
+  const executeJumpToFile = useCallback(
+    async (target: { repoName: string; file: string }, line?: number, targetIndex?: number) => {
       const cacheKey = `${target.repoName}/${target.file}`;
+      if (targetIndex !== undefined && targetIndex >= 0) {
+        setSelectedFileIndex(targetIndex);
+      }
+      setRevealFile(cacheKey);
+      setRevealKey((value) => value + 1);
 
       // Ensure repo is expanded
       setCollapsedRepos((prev) => ({ ...prev, [target.repoName]: false }));
@@ -564,44 +592,65 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
         await toggleFileExpansion(target.repoName, target.file);
       }
 
-      // Scroll to file in DOM
-      const cleanId = `file-diff-${target.repoName}-${target.file.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-      setTimeout(() => {
-        const elem = document.getElementById(cleanId);
-        if (elem) {
-          elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      }, 50);
+      // Scroll to file in DOM with retry
+      const cleanDomId = getFileDomId(target.repoName, target.file);
+      scrollToElement(cleanDomId);
     },
-    [treeOrderedFiles, expandedFiles, toggleFileExpansion, gitChanges]
+    [gitChanges, expandedFiles, toggleFileExpansion, scrollToElement]
   );
 
+  // Jump to a specific file in the changeset and optionally reveal a line
+  const jumpToFile = useCallback(
+    async (index: number, line?: number) => {
+      if (index < 0 || index >= treeOrderedFiles.length) return;
+      const target = treeOrderedFiles[index];
+      await executeJumpToFile(target, line, index);
+    },
+    [treeOrderedFiles, executeJumpToFile]
+  );
 
   // Handle Cross-File Definition Jumps from Monaco registerEditorOpener or Symbol Navigator
-  const handleCrossFileOpen = (targetRepo: string, targetFile: string, line?: number) => {
-    let filesList = treeOrderedFiles;
-    if (searchFilter.trim()) {
-      const allVisualFiles = gitChanges.flatMap((repo) =>
-        getTreeOrderedFiles(repo.files || []).map((f: any) => ({
-          repoName: repo.repoName,
-          repoPath: repo.repoPath,
-          file: f.file,
-          type: f.type || 'modified',
-          additions: f.additions || 0,
-          deletions: f.deletions || 0,
-        }))
-      );
-      const allIdx = findChangedFileIndex(allVisualFiles, targetRepo, targetFile);
-      if (allIdx !== -1) {
-        setSearchFilter('');
-        filesList = allVisualFiles;
-      }
-    }
-    const index = findChangedFileIndex(filesList, targetRepo, targetFile);
+  const handleCrossFileOpen = useCallback((targetRepo: string, rawTargetFile: string, rawLine?: number) => {
+    let targetFile = rawTargetFile;
+    let line = rawLine;
 
-    if (index !== -1) {
-      void jumpToFile(index, line);
-      showToast?.(`Navigated to ${targetFile}${line ? `:${line}` : ''}`, 'info');
+    // Extract #L<line> or :<line> if present in targetFile
+    const lineAnchor = targetFile.match(/#L(\d+)(?:-L?\d+)?$/i)
+      ?? targetFile.match(/:(\d+)(?::\d+)?$/)
+      ?? targetFile.match(/\((\d+)(?:,\d+)?\)$/);
+    if (lineAnchor) {
+      if (!line) {
+        const parsed = Number(lineAnchor[1]);
+        if (Number.isSafeInteger(parsed) && parsed > 0) line = parsed;
+      }
+      targetFile = targetFile.slice(0, -lineAnchor[0].length);
+    }
+    targetFile = targetFile.replace(/#.*$/, '');
+
+    // Collect all changed files across repos in visual tree order
+    const allVisualFiles = gitChanges.flatMap((repo) =>
+      getTreeOrderedFiles(repo.files || []).map((f: any) => ({
+        repoName: repo.repoName,
+        repoPath: repo.repoPath,
+        file: f.file,
+        type: f.type || 'modified',
+        additions: f.additions || 0,
+        deletions: f.deletions || 0,
+      }))
+    );
+
+    // Resolve the file directly by (repoName, filePath)
+    const matchIdx = findChangedFileIndex(allVisualFiles, targetRepo, targetFile);
+
+    if (matchIdx !== -1) {
+      const target = allVisualFiles[matchIdx];
+      // If a search filter was active, clear it so the tree displays the target file
+      if (searchFilter.trim()) {
+        setSearchFilter('');
+      }
+      // Execute the jump directly targeting that file without relying on stale treeOrderedFiles closure
+      void executeJumpToFile(target, line, matchIdx);
+      showToast?.(`Navigated to ${target.file}${line ? `:${line}` : ''}`, 'info');
     } else {
       const matchedRepo = gitChanges.find((r) => r.repoName === targetRepo);
       const targetRepoPath = matchedRepo?.repoPath
@@ -614,7 +663,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
       showToast?.(`Opening ${targetFile}${line ? `:${line}` : ''} in ${editorLabel}`, 'info');
       openInVsCodeAtLine(targetRepoPath ?? '', targetFile, line || 1, 1, defaultEditor);
     }
-  };
+  }, [gitChanges, searchFilter, executeJumpToFile, showToast, ws.repos, editorLabel, defaultEditor]);
 
   // Keyboard navigation shortcuts: Alt+Down (next file) and Alt+Up (prev file)
   useEffect(() => {
@@ -1082,7 +1131,7 @@ export const ChangesViewer: React.FC<ChangesViewerProps> = ({
                         const error = diffErrors[cacheKey] || '';
                         const omitted = omittedCache[cacheKey];
                         const notice = omittedNotice(omitted);
-                        const cleanDomId = `file-diff-${repo.repoName}-${fileInfo.file.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+                        const cleanDomId = getFileDomId(repo.repoName, fileInfo.file);
 
                         return (
                           <div

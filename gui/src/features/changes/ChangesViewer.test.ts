@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChangesViewer } from './ChangesViewer.js';
+import { findChangedFileIndex, getFileDomId } from './utils/changesetNavigation.js';
 import { buildCompactedTree, filterTreeFiles, getMatchingBranchPaths, treeOrderedFiles } from './FileTree.js';
 import type { Feature } from '../../types.js';
 
@@ -213,5 +214,57 @@ describe('ChangesViewer Jump Bar Search & Filter', () => {
     searchCollapsedRepos[target.repoName] = false;
 
     expect(searchCollapsedRepos['repo-a']).toBe(false);
+  });
+
+  it('generates distinct DOM IDs for files differing only by punctuation without collision', () => {
+    const repoName = 'my-repo';
+    const files = [
+      'foo-bar.ts',
+      'foo.bar.ts',
+      'foo/bar.ts',
+      'foo_bar.ts',
+    ];
+
+    const domIds = files.map(f => getFileDomId(repoName, f));
+    const uniqueIds = new Set(domIds);
+
+    expect(uniqueIds.size).toBe(files.length);
+    expect(domIds[0]).not.toBe(domIds[1]);
+    expect(domIds[1]).not.toBe(domIds[2]);
+    expect(domIds[2]).not.toBe(domIds[3]);
+    expect(domIds[0]).toContain('foo-bar.ts');
+    expect(domIds[1]).toContain('foo.bar.ts');
+    expect(domIds[2]).toContain('foo/bar.ts');
+    expect(domIds[3]).toContain('foo_bar.ts');
+  });
+
+  it('resolves cross-file jump targets from all changes even when filtered out by searchFilter', () => {
+    const searchFilter = 'button';
+    // When filter is 'button', only Button.tsx matches in repo-a
+    const filteredVisualFiles = sampleGitChanges.flatMap(repo =>
+      filterTreeFiles(repo.files, searchFilter).map(f => ({
+        repoName: repo.repoName,
+        file: f.file,
+      }))
+    );
+    expect(filteredVisualFiles.length).toBe(1);
+
+    // Cross-file jump targets api/server.ts in repo-b, which is NOT in filteredVisualFiles
+    const allVisualFiles = sampleGitChanges.flatMap(repo =>
+      treeOrderedFiles(repo.files).map(f => ({
+        repoName: repo.repoName,
+        file: f.file,
+      }))
+    );
+    expect(allVisualFiles.length).toBe(5);
+
+    // findChangedFileIndex in filtered list fails (-1)
+    const filteredIdx = findChangedFileIndex(filteredVisualFiles, 'repo-b', 'api/server.ts');
+    expect(filteredIdx).toBe(-1);
+
+    // Direct resolution across allVisualFiles finds the target correctly
+    const matchIdx = findChangedFileIndex(allVisualFiles, 'repo-b', 'api/server.ts');
+    expect(matchIdx).not.toBe(-1);
+    expect(allVisualFiles[matchIdx]?.file).toBe('api/server.ts');
   });
 });

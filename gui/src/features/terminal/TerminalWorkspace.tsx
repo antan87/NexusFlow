@@ -114,6 +114,18 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<C
       return;
     }
 
+    let line = reference.line;
+    const location = cleanPath.match(/:(\d+)(?::\d+)?$/)
+      ?? cleanPath.match(/\((\d+)(?:,\d+)?\)$/)
+      ?? cleanPath.match(/#L(\d+)(?:-L?\d+)?$/i);
+    if (location) {
+      cleanPath = cleanPath.slice(0, -location[0].length);
+      const lineNumber = Number(location[1]);
+      if (Number.isSafeInteger(lineNumber) && lineNumber > 0 && !line) {
+        line = lineNumber;
+      }
+    }
+
     if (/^file:\/\//i.test(cleanPath)) {
       try {
         cleanPath = decodeURIComponent(new URL(cleanPath).pathname).replace(/^\/([a-z]:\/)/i, '$1');
@@ -122,15 +134,7 @@ export function TerminalWorkspace({ workspacePath, repoPaths, ...props }: Pick<C
       }
     }
 
-    let line = reference.line;
-    const location = cleanPath.match(/:(\d+)(?::\d+)?$/) ?? cleanPath.match(/\((\d+)(?:,\d+)?\)$/);
-    if (location) {
-      cleanPath = cleanPath.slice(0, -location[0].length);
-      const lineNumber = Number(location[1]);
-      if (Number.isSafeInteger(lineNumber) && lineNumber > 0 && !line) {
-        line = lineNumber;
-      }
-    }
+    cleanPath = cleanPath.replace(/#.*$/, '');
 
     if (!isPathInsideWorkspace(cleanPath, workspacePath, repoPaths)) {
       return;

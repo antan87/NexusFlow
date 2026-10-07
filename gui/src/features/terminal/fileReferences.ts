@@ -25,7 +25,9 @@ export function findFileReferences(row: string): FileReference[] {
 
     let text = raw;
     while (/[,'"`\]};.!?)}>]$/.test(text) && !/\(\d+(?:,\d+)?\)$/.test(text)) text = text.slice(0, -1);
-    const location = text.match(/:(\d+)(?::\d+)?$/) ?? text.match(/\((\d+)(?:,\d+)?\)$/);
+    const location = text.match(/:(\d+)(?::\d+)?$/)
+      ?? text.match(/\((\d+)(?:,\d+)?\)$/)
+      ?? text.match(/#L(\d+)(?:-L?\d+)?$/i);
     const lineNumber = Number(location?.[1]);
     const line = Number.isSafeInteger(lineNumber) && lineNumber > 0 ? lineNumber : undefined;
     let path = (location ? text.slice(0, -location[0].length) : text).replace(/['"`>]$/, '');
@@ -36,6 +38,7 @@ export function findFileReferences(row: string): FileReference[] {
         path = path.replace(/^file:\/\//i, '');
       }
     }
+    path = path.replace(/#.*$/, '');
     if (!path || isWebOrDomain(path)) continue;
     if (!/[/\\]/.test(path) && !/^[^.:]+(?:\.[a-z\d_-]+)*\.[a-z][a-z\d]{0,11}$/i.test(path)) continue;
     if (/^(?:\.\.?[/\\])?$/.test(path)) continue;
@@ -63,7 +66,9 @@ export function findFileReferences(row: string): FileReference[] {
     const leading = token.match(/^[('"`[{<]*/)?.[0].length ?? 0;
     let text = token.slice(leading);
     while (/[,'"`\]};.!?)}>]$/.test(text) && !/\(\d+(?:,\d+)?\)$/.test(text)) text = text.slice(0, -1);
-    const location = text.match(/:(\d+)(?::\d+)?$/) ?? text.match(/\((\d+)(?:,\d+)?\)$/);
+    const location = text.match(/:(\d+)(?::\d+)?$/)
+      ?? text.match(/\((\d+)(?:,\d+)?\)$/)
+      ?? text.match(/#L(\d+)(?:-L?\d+)?$/i);
     const lineNumber = Number(location?.[1]);
     const line = Number.isSafeInteger(lineNumber) && lineNumber > 0 ? lineNumber : undefined;
     let path = (location ? text.slice(0, -location[0].length) : text).replace(/['"`>]$/, '');
@@ -74,6 +79,7 @@ export function findFileReferences(row: string): FileReference[] {
         path = path.replace(/^file:\/\//i, '');
       }
     }
+    path = path.replace(/#.*$/, '');
     if (!path || isWebOrDomain(path)) continue;
     if (!/[/\\]/.test(path) && !/^[^.:]+(?:\.[a-z\d_-]+)*\.[a-z][a-z\d]{0,11}$/i.test(path)) continue;
     if (/^(?:\.\.?[/\\])?$/.test(path)) continue;

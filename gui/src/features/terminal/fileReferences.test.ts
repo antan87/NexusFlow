@@ -72,4 +72,30 @@ describe('terminal file references', () => {
       { path: '/home/user/repo/src/App.tsx', line: 25 },
     ]);
   });
+
+  it('detects GitHub #L<line> and #L<start>-L<end> line anchors in plaintext and markdown links', () => {
+    const found = findFileReferences('see file.ts#L42 and file.ts#L10-L20 plus [header](src/Header.tsx#L99) and [nav](src/Nav.tsx#L5-L15)');
+    expect(found.map(({ path, line }) => ({ path, line }))).toEqual([
+      { path: 'file.ts', line: 42 },
+      { path: 'file.ts', line: 10 },
+      { path: 'src/Header.tsx', line: 99 },
+      { path: 'src/Nav.tsx', line: 5 },
+    ]);
+  });
+
+  it('handles file:// URLs with GitHub #L anchors', () => {
+    const found = findFileReferences('see file:///home/user/repo/src/Button.tsx#L42 and [app](file:///home/user/repo/src/App.tsx#L12-L24)');
+    expect(found.map(({ path, line }) => ({ path, line }))).toEqual([
+      { path: '/home/user/repo/src/Button.tsx', line: 42 },
+      { path: '/home/user/repo/src/App.tsx', line: 12 },
+    ]);
+  });
+
+  it('strips section anchors without line numbers', () => {
+    const found = findFileReferences('read docs/guide.md#installation and [readme](README.md#getting-started)');
+    expect(found.map(({ path, line }) => ({ path, line }))).toEqual([
+      { path: 'docs/guide.md', line: undefined },
+      { path: 'README.md', line: undefined },
+    ]);
+  });
 });

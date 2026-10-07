@@ -105,6 +105,16 @@ describe('TerminalWorkspace link routing guards and inspector control', () => {
     const validFileUri = resolveFileReference('file:///home/user/workspace/nexusflow/src/index.ts', repos);
     expect(validFileUri.file?.file).toBe('src/index.ts');
 
+    // Valid file with GitHub line anchor and section anchor
+    const validAnchor = resolveFileReference('src/index.ts#L42', repos);
+    expect(validAnchor.file?.file).toBe('src/index.ts');
+    const validRangeAnchor = resolveFileReference('src/index.ts#L10-L20', repos);
+    expect(validRangeAnchor.file?.file).toBe('src/index.ts');
+    const validSectionAnchor = resolveFileReference('README.md#setup-section', repos);
+    expect(validSectionAnchor.file?.file).toBe('README.md');
+    const validFileUriAnchor = resolveFileReference('file:///home/user/workspace/nexusflow/src/index.ts#L42', repos);
+    expect(validFileUriAnchor.file?.file).toBe('src/index.ts');
+
     // Valid file in other-repo
     const validOther = resolveFileReference('README.md', repos);
     expect(validOther.file).toBeDefined();

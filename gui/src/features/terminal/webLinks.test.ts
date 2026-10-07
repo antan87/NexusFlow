@@ -43,6 +43,8 @@ describe('webLinks', () => {
     expect(isWebOrDomain('app.spec.tsx')).toBe(false);
     expect(isWebOrDomain('vite.config.ts')).toBe(false);
     expect(isWebOrDomain('README.md')).toBe(false);
+    expect(isWebOrDomain('README.md#getting-started')).toBe(false);
+    expect(isWebOrDomain('file.ts#L42')).toBe(false);
     expect(isWebOrDomain('deploy.sh')).toBe(false);
     expect(isWebOrDomain('package.json')).toBe(false);
     expect(isWebOrDomain('build.log')).toBe(false);
