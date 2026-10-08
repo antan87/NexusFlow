@@ -104,7 +104,7 @@ test.describe('reviewed commit', () => {
 
     await panel.getByLabel('Commit message').fill('feat: reviewed');
     await panel.getByRole('button', { name: 'Commit & push selected' }).click();
-    await expect(page.getByText('Commit & Push Results')).toBeVisible();
+    await expect(page.getByText('Commit results', { exact: true })).toBeVisible();
     expect(body).toEqual({ message: 'feat: reviewed', noPush: false, files: { api: ['src/a.ts'], web: ['page.tsx'] } });
     await expect(page.getByText(/aaa1111\) on feat\/deliver, pushed/)).toBeVisible();
   });

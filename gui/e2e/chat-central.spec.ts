@@ -113,7 +113,7 @@ test.describe('the chat is central, with other parts beside it', () => {
   test('opens another part from the rail without the chat leaving', async ({ page }) => {
     await page.goto('/#/workspaces/alpha/chat');
     await expect(chatOf(page).getByTestId('terminal-state')).toHaveText('Running');
-    await destinations(page).getByRole('link', { name: /^Changes/ }).click();
+    await destinations(page).getByRole('link', { name: /^Code/ }).click();
     await expect(page).toHaveURL(/#\/workspaces\/alpha\/changes$/);
     await expect(chatOf(page)).toBeVisible();
     await expect(chatOf(page).getByTestId('terminal-state')).toHaveText('Running');
@@ -135,7 +135,7 @@ test.describe('the chat is central, with other parts beside it', () => {
     });
     await page.goto('/#/workspaces/alpha/plan');
     await expect(chatOf(page).getByTestId('terminal-state')).toHaveText('Running');
-    await destinations(page).getByRole('link', { name: /^Changes/ }).click();
+    await destinations(page).getByRole('link', { name: /^Code/ }).click();
     await destinations(page).getByRole('link', { name: 'Services' }).click();
     await expect(destinations(page).getByRole('link', { name: 'Services' })).toHaveAttribute('aria-current', 'page');
     // Choosing the open part again closes it.
@@ -232,7 +232,7 @@ test.describe('the rail beside the panel opens the parts, and the header is one 
     expect(rail.width).toBeLessThanOrEqual(RAIL + 1);
     // What can open beside the chat; the chat itself, the overview and the session history have no place on it.
     // Knowledge is read in Docs, with the other files ContextSpace keeps.
-    await expect(destinations(page).getByRole('link')).toHaveText(['Plan', 'Changes', 'Docs', 'Skills', 'Services']);
+    await expect(destinations(page).getByRole('link')).toHaveText(['Plan', 'Code', 'Docs', 'Skills', 'Services']);
   });
 
   test('marks the part that is open, names it above the panel, and closes it when chosen again', async ({ page }) => {

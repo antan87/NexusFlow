@@ -114,8 +114,8 @@ test.describe('keyboard-only primary journey', () => {
     await activate(page, page.getByRole('button', { name: 'Run verification', exact: true }));
     await expect(page.getByRole('group', { name: 'Task status' })).toContainText('Verified (1.5s)');
 
-    // Review: open Changes, review the commit, commit by keyboard.
-    await activate(page, destinations.getByRole('link', { name: /^Changes/ }));
+    // Review: open Code, review the commit, commit by keyboard.
+    await activate(page, destinations.getByRole('link', { name: /^Code/ }));
     await expect(page).toHaveURL(/\/changes$/);
     await activate(page, page.getByRole('button', { name: 'Review & commit', exact: true }));
     const panel = page.getByRole('region', { name: 'Review commit' });

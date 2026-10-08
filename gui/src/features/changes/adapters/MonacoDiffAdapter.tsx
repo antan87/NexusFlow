@@ -78,8 +78,15 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
     onLineSelectRef.current = onLineSelect;
   });
 
-  const initialJumpDoneRef = useRef<string>('');
-  const lastJumpNonceRef = useRef<number | undefined>(undefined);
+  const targetLineRef = useRef(targetLine);
+  const jumpNonceRef = useRef(jumpNonce);
+  useEffect(() => {
+    targetLineRef.current = targetLine;
+    jumpNonceRef.current = jumpNonce;
+  });
+
+  const lastDiffLayoutKeyRef = useRef<string>('');
+  const lastJumpKeyRef = useRef<string>('');
 
   // Dynamically update viewMode without recreating editor
   useEffect(() => {
@@ -113,13 +120,14 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
   // Track targetLine jumps in modified buffer (only on intentional jump requests)
   useEffect(() => {
     if (!editorInstanceRef.current || !targetLine || targetLine <= 0) return;
-    if (lastJumpNonceRef.current === jumpNonce) return;
-    lastJumpNonceRef.current = jumpNonce;
+    const jumpKey = `${targetLine}:${jumpNonce ?? 0}`;
+    if (lastJumpKeyRef.current === jumpKey) return;
+    lastJumpKeyRef.current = jumpKey;
 
     const modifiedEditor = editorInstanceRef.current.getModifiedEditor();
     modifiedEditor.revealLineInCenter(targetLine);
     modifiedEditor.setPosition({ lineNumber: targetLine, column: 1 });
-    modifiedEditor.focus();
+    // Scrolling to a line does not take the focus: a path clicked in the terminal must leave the keyboard there.
 
     // Flash highlight on the target line
     if (!decorationCollectionRef.current) {
@@ -171,6 +179,9 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
       diffEditor = monaco.editor.createDiffEditor(containerRef.current, {
         readOnly: true,
         renderSideBySide: viewMode === 'side-by-side',
+        // Monaco turns side by side into inline below 900px by default; a side panel is often narrower than that
+        // while still roomy enough, and the toggle should show what the user chose.
+        renderSideBySideInlineBreakpoint: 560,
         ignoreTrimWhitespace: ignoreWhitespace,
         hideUnchangedRegions: {
           enabled: false,
@@ -179,7 +190,8 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
         originalEditable: false,
         automaticLayout: true,
         scrollBeyondLastLine: false,
-        minimap: { enabled: true, maxColumn: 60 },
+        // The overview ruler beside the scrollbar marks every change; a minimap only crowds a side panel.
+        minimap: { enabled: false },
         scrollbar: {
           verticalScrollbarSize: 8,
           horizontalScrollbarSize: 8,
@@ -205,20 +217,21 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
         onLineSelectRef.current?.(e.position.lineNumber);
       });
 
-      // Synchronize initial targetLine on first diff computation, avoiding scroll jump-back on subsequent diff updates
+      // Adjust and re-center targetLine after Monaco completes diff computation & layout
       updateSub = diffEditor.onDidUpdateDiff(() => {
-        const jumpKey = `${filePath}:${targetLine}`;
-        if (targetLine && targetLine > 0 && initialJumpDoneRef.current !== jumpKey) {
-          initialJumpDoneRef.current = jumpKey;
-          modifiedEditor.revealLineInCenter(targetLine);
-          modifiedEditor.setPosition({ lineNumber: targetLine, column: 1 });
+        const currentTarget = targetLineRef.current;
+        if (currentTarget && currentTarget > 0) {
+          const key = `${filePath}:${currentTarget}:${jumpNonceRef.current ?? 0}`;
+          if (lastDiffLayoutKeyRef.current !== key) {
+            lastDiffLayoutKeyRef.current = key;
+            modifiedEditor.revealLineInCenter(currentTarget);
+            modifiedEditor.setPosition({ lineNumber: currentTarget, column: 1 });
+          }
         }
       });
 
       // If an initial targetLine is supplied, reveal it immediately after mounting
       if (targetLine && targetLine > 0) {
-        const jumpKey = `${filePath}:${targetLine}`;
-        initialJumpDoneRef.current = jumpKey;
         modifiedEditor.revealLineInCenter(targetLine);
         modifiedEditor.setPosition({ lineNumber: targetLine, column: 1 });
       }
@@ -234,6 +247,8 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
       diffEditor?.dispose();
       editorInstanceRef.current = null;
     };
+    // Lifecycle hook manages Monaco creation/disposal; content/viewMode/targetLine updates handled in separate effects
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath, repoName, repoPath]);
 
   return (

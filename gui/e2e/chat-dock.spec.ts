@@ -101,7 +101,7 @@ test.describe('the chat is the centre of a workspace', () => {
 
     await workspaceNav(page).getByRole('link', { name: 'Plan' }).click();
     await expect(chatOf(page)).toBeHidden();
-    await workspaceNav(page).getByRole('link', { name: /^Changes/ }).click();
+    await workspaceNav(page).getByRole('link', { name: /^Code/ }).click();
     await expect(page).toHaveURL(/\/changes$/);
     await page.getByRole('button', { name: 'Close this panel and give the chat the whole screen' }).click();
 

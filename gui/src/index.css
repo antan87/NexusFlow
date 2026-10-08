@@ -634,3 +634,10 @@
   --ring-b: var(--brand-middle);
   --ring-c: var(--brand-last);
 }
+
+/* File tree rows are flat and of one height, so rows scrolled out of view can skip rendering
+   without changing the scroll height (a whole repository can be thousands of rows). */
+.tree-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 24px;
+}

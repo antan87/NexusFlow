@@ -1,4 +1,5 @@
 import { listRepositoryChangesWithFingerprint, parseGitStatus } from './core/repository-changes.js';
+import { resolveFileReference } from './core/file-reference-resolve.js';
 import { decodeImageAttachment, InvalidImageAttachment } from './services/image-attachment.js';
 import { registerTerminalRoutes, terminalManager } from './terminal/routes.js';
 import { registerWorkGuidanceRoutes } from './http/work-guidance-routes.js';
@@ -2491,6 +2492,33 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
     }
 
     return c.json({ diff, fileContent, originalContent, symbols, ...(contentOmitted ? { contentOmitted } : {}), ...(diffOmitted ? { diffOmitted: true } : {}) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13_resolve. Which repository file a path printed in a terminal or a document names.
+// The code view asks this instead of downloading the whole listing and matching it itself, and
+// the answer covers ignored files and paths relative to the directory the session runs in.
+app.get('/api/workspace/:id/files/resolve', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const reference = c.req.query('path');
+    if (!reference) return c.json({ error: 'Missing path query parameter.' }, 400);
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const feature = await loadFeatureConfig(workspacePath);
+    if (!feature) return c.json({ error: 'Workspace configuration not found.' }, 404);
+    const repos = feature.repos.map((repoPath) => ({
+      repoName: path.basename(repoPath),
+      repoPath: resolveFeatureRepoPath(feature, workspacePath, repoPath),
+    }));
+    return c.json(await resolveFileReference(reference, {
+      repos,
+      workspacePath,
+      cwd: c.req.query('cwd') || undefined,
+      listFiles: async (repo) => (await listRepositoryChangesWithFingerprint(repo.repoPath, true)).files.map((file) => file.file),
+    }));
   } catch (error) {
     return errorResponse(c, error);
   }

@@ -16,6 +16,7 @@ import { apiFetch } from '../../lib/api/client.js';
 import { clipboardHtmlToText, readClipboardText, safeCopyToClipboard } from '../../lib/clipboard.js';
 import { terminalRequest, terminalToken, terminalSocketUrl, type TerminalInfo, type TerminalLaunch, type TerminalStatus } from './client.js';
 import { findFileReferences, type FileReference } from './fileReferences.js';
+import { findWebLinks } from './webLinks.js';
 import { toPromptText } from './promptFill.js';
 import { SHIFT_ENTER_SEQUENCE, terminalKeyAction } from './terminalKeys.js';
 import type { AISession } from '../../types.js';
@@ -66,7 +67,7 @@ const paneStatusFor = (kind: PaneState['kind']): PaneStatus => {
   }
 };
 
-interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'>) => void; codeVisible?: boolean; inspectorControls?: ReactNode; inspectorExpandControl?: ReactNode; onStatusChange?: (status: PaneStatus) => void; onBackgroundOutput?: () => void; fillPromptRef?: { current: ((text: string) => boolean) | null };
+interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'> & { cwd?: string }) => void; inspectorControls?: ReactNode; onStatusChange?: (status: PaneStatus) => void; onBackgroundOutput?: () => void; fillPromptRef?: { current: ((text: string) => boolean) | null };
   /** The developer sent a line to an assistant (not a plain shell): their reply to whatever it asked. */
   onReply?: (target: string) => void;
   /** The terminal this pane shows, chosen by its session tab: null for none yet, undefined while the tab still looks.
@@ -84,7 +85,7 @@ interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; c
   primary?: boolean;
   /** True while this pane starts or resumes a terminal, so the tabs do not give it a tab of its own meanwhile. */
   onBusyChange?: (busy: boolean) => void }
-export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenFileReference, codeVisible, inspectorControls, inspectorExpandControl, onStatusChange, onBackgroundOutput, fillPromptRef, onReply, boundTerminalId, claimed, onTerminalChange, onShowTerminal, sessionTabs, primary = true, onBusyChange }: Props) {
+export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenFileReference, inspectorControls, onStatusChange, onBackgroundOutput, fillPromptRef, onReply, boundTerminalId, claimed, onTerminalChange, onShowTerminal, sessionTabs, primary = true, onBusyChange }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const renderer = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -97,7 +98,6 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   // The saved conversations shown over an ended terminal. A pane with no terminal lists them under the tool buttons.
   const [showHistory, setShowHistory] = useState(false);
   const [terminal, setTerminal] = useState<TerminalInfo | null>(null);
-  useEffect(() => { if (codeVisible && terminal) setShowHistory(false); }, [codeVisible, terminal]);
   useEffect(() => { if (terminal) setShowHistory(false); }, [terminal]);
   const [paneState, setPaneState] = useState<PaneState>({ kind: 'connecting' });
   const [endedByUser, setEndedByUser] = useState(false);
@@ -137,6 +137,9 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   const backgroundOutputRef = useRef(onBackgroundOutput);
   useEffect(() => { activeRef.current = active; }, [active]);
   useEffect(() => { openFileRef.current = onOpenFileReference; }, [onOpenFileReference]);
+  // Where the session runs, so a relative path it prints resolves from there. Read by the link providers.
+  const cwdRef = useRef<string | undefined>(undefined);
+  useEffect(() => { cwdRef.current = terminal?.cwd; }, [terminal]);
   useEffect(() => { statusChangeRef.current = onStatusChange; backgroundOutputRef.current = onBackgroundOutput; }, [onStatusChange, onBackgroundOutput]);
   const replyRef = useRef(onReply);
   useEffect(() => { replyRef.current = onReply; }, [onReply]);
@@ -204,7 +207,19 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
 
   useEffect(() => {
     if (!host.current) return;
-    const term = new Terminal({ cursorBlink: true, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, scrollback: 5000, allowProposedApi: false, theme: { background: '#111b18', foreground: '#e1e9e4', cursor: '#a3dbae' } });
+    const term = new Terminal({
+      cursorBlink: true, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, scrollback: 5000, allowProposedApi: false,
+      theme: { background: '#111b18', foreground: '#e1e9e4', cursor: '#a3dbae' },
+      // Hyperlinks a CLI embeds in its output (OSC 8). Without a handler xterm asks for confirmation and
+      // opens a file:// link in a blank window, which shows nothing; files open in Code like printed paths.
+      linkHandler: {
+        allowNonHttpProtocols: true,
+        activate: (_event, uri) => {
+          if (/^https?:\/\//i.test(uri)) window.open(uri, '_blank', 'noopener,noreferrer');
+          else if (/^file:\/\//i.test(uri)) openFileRef.current?.({ path: uri, cwd: cwdRef.current });
+        },
+      },
+    });
     const sizing = new FitAddon(), searching = new SearchAddon();
     term.loadAddon(sizing); term.loadAddon(searching); term.open(host.current);
     const terminalHost = host.current;
@@ -258,18 +273,18 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
           return true;
       }
     });
-    const links = term.registerLinkProvider({ provideLinks(bufferLineNumber, callback) {
+    const getWindowedRows = (bufferLineNumber: number) => {
       const buffer = term.buffer.active;
       let first = bufferLineNumber - 1;
       while (first > 0 && buffer.getLine(first)?.isWrapped && bufferLineNumber - first <= 20) first--;
-      if (buffer.getLine(first)?.isWrapped) { callback([]); return; }
+      if (buffer.getLine(first)?.isWrapped) return null;
       let last = bufferLineNumber - 1;
       while (buffer.getLine(last + 1)?.isWrapped && last - first < 20) last++;
-      if (buffer.getLine(last + 1)?.isWrapped) { callback([]); return; }
+      if (buffer.getLine(last + 1)?.isWrapped) return null;
       const rows: { line: IBufferLine; text: string }[] = [];
       for (let at = first; at <= last; at++) {
         const line = buffer.getLine(at);
-        if (!line) { callback([]); return; }
+        if (!line) return null;
         rows.push({ line, text: line.translateToString(at === last) });
       }
       const positionAt = (offset: number, ending: boolean) => {
@@ -286,10 +301,26 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
         }
         return { x: 1, y: first + 1 };
       };
-      callback(findFileReferences(rows.map(row => row.text).join('')).map(reference => ({
+      return { rows, text: rows.map(r => r.text).join(''), positionAt };
+    };
+    const webLinks = term.registerLinkProvider({ provideLinks(bufferLineNumber, callback) {
+      const windowed = getWindowedRows(bufferLineNumber);
+      if (!windowed) { callback([]); return; }
+      callback(findWebLinks(windowed.text).map(link => ({
+        text: link.text,
+        range: { start: windowed.positionAt(link.start, false), end: windowed.positionAt(link.end, true) },
+        activate: () => {
+          window.open(link.url, '_blank', 'noopener,noreferrer');
+        },
+      })));
+    } });
+    const links = term.registerLinkProvider({ provideLinks(bufferLineNumber, callback) {
+      const windowed = getWindowedRows(bufferLineNumber);
+      if (!windowed) { callback([]); return; }
+      callback(findFileReferences(windowed.text).map(reference => ({
         text: reference.text,
-        range: { start: positionAt(reference.start, false), end: positionAt(reference.end, true) },
-        activate: () => openFileRef.current?.({ path: reference.path, line: reference.line }),
+        range: { start: windowed.positionAt(reference.start, false), end: windowed.positionAt(reference.end, true) },
+        activate: () => openFileRef.current?.({ path: reference.path, line: reference.line, cwd: cwdRef.current }),
       })));
     } });
     renderer.current = term; fit.current = sizing; search.current = searching;
@@ -316,7 +347,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       }
     });
     observer.observe(host.current);
-    return () => { terminalHost.removeEventListener('keydown', onPasteShortcut, true); terminalHost.removeEventListener('paste', onPaste, true); observer.disconnect(); links.dispose(); input.dispose(); resize.dispose(); term.dispose(); renderer.current = null; };
+    return () => { terminalHost.removeEventListener('keydown', onPasteShortcut, true); terminalHost.removeEventListener('paste', onPaste, true); observer.disconnect(); webLinks.dispose(); links.dispose(); input.dispose(); resize.dispose(); term.dispose(); renderer.current = null; };
   }, [send]);
   useEffect(() => {
     if (!active || !terminal) return;
@@ -557,7 +588,6 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       </span>}
       <span className="flex-1" />
       {inspectorControls}
-      {inspectorExpandControl}
       {terminal && <Menu open={paneMenuOpen} onOpenChange={setPaneMenuOpen}>
         <MenuTrigger aria-label="Pane options" className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground" title="Open terminals, usage and terminal tools">
           <MoreHorizontal className="size-3" />

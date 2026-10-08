@@ -22,10 +22,8 @@ interface SessionDeckProps {
   onReply: (target: string) => void;
   onStatusChange?: (status: PaneStatus) => void;
   onBackgroundOutput?: () => void;
-  onOpenFileReference?: (reference: { path: string; line?: number }) => void;
-  codeVisible: boolean;
+  onOpenFileReference?: (reference: { path: string; line?: number; cwd?: string }) => void;
   inspectorControls?: ReactNode;
-  inspectorExpandControl?: ReactNode;
 }
 
 interface Deck { slots: readonly Slot[]; active: string; split: string | null }
@@ -38,7 +36,7 @@ interface Deck { slots: readonly Slot[]; active: string; split: string | null }
  */
 const CLOSE_PROBLEM_MS = 8000;
 
-export function SessionDeck({ workspace, active, launch, consumeLaunch, fillPromptRef, onReply, onStatusChange, onBackgroundOutput, onOpenFileReference, codeVisible, inspectorControls, inspectorExpandControl }: SessionDeckProps) {
+export function SessionDeck({ workspace, active, launch, consumeLaunch, fillPromptRef, onReply, onStatusChange, onBackgroundOutput, onOpenFileReference, inspectorControls }: SessionDeckProps) {
   const queryClient = useQueryClient();
   const [deck, setDeck] = useState<Deck>(() => ({ slots: [firstSlot()], active: 'main', split: null }));
   const [infos, setInfos] = useState<Record<string, TerminalInfo | null>>({});
@@ -253,9 +251,7 @@ export function SessionDeck({ workspace, active, launch, consumeLaunch, fillProm
               onReply={onReply}
               fillPromptRef={fillRefOf(slot.key)}
               onOpenFileReference={onOpenFileReference}
-              codeVisible={left && codeVisible}
               inspectorControls={left ? inspectorControls : undefined}
-              inspectorExpandControl={left ? inspectorExpandControl : undefined}
               sessionTabs={left ? tabs : <span className="flex min-w-0 items-center gap-1.5 truncate px-1 text-xs font-medium text-foreground">{labels.get(slot.key)}</span>}
             />
           </div>

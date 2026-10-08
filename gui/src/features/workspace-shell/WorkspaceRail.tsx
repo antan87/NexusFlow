@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Archive, FileText, GitCompare, Lightbulb, ListChecks, Puzzle, Server, type LucideIcon } from 'lucide-react';
+import { Archive, FileCode, FileText, Lightbulb, ListChecks, Puzzle, Server, type LucideIcon } from 'lucide-react';
 
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../../components/ui/tooltip.js';
 import { cn } from '../../lib/utils.js';
@@ -11,7 +11,7 @@ interface RailItem { label: string; purpose: string; icon: LucideIcon }
 const ITEMS: Partial<Record<WorkspaceSection, RailItem>> = {
   overview: { label: 'Record', purpose: 'What this archived workspace did and where its work went', icon: Archive },
   plan: { label: 'Plan', purpose: 'The brief, the milestones and what the assistant is asked to do', icon: ListChecks },
-  changes: { label: 'Changes', purpose: 'Review, commit and finish the work', icon: GitCompare },
+  changes: { label: 'Code', purpose: 'The code and its changes: read files, review, commit and finish the work', icon: FileCode },
   documents: { label: 'Docs', purpose: 'Documents in the workspace', icon: FileText },
   knowledge: { label: 'Knowledge', purpose: 'What the assistant has learned in this workspace', icon: Lightbulb },
   skills: { label: 'Skills', purpose: 'Instructions the assistant follows here', icon: Puzzle },

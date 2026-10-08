@@ -102,7 +102,7 @@ import { useFloatingChat } from '../features/chat/floatingChatStore.js';
 import { ChatDockSlot } from '../features/chat/ChatDockSlot.js';
 import { CHAT_LAYOUT, chatLayout, hasRoomBeside, useChatLayout } from '../features/chat/chatLayout.js';
 import { useElementWidth } from '../lib/useElementWidth.js';
-import { ChangesViewer } from '../features/changes/ChangesViewer.js';
+import { CodeSection } from '../features/changes/CodeSection.js';
 import { KnowledgeBase } from '../features/knowledge/KnowledgeBase.js';
 import { ImplementationPlan } from '../features/plan/ImplementationPlan.js';
 import { RootDocumentsPanel } from '../features/work-guidance/RootDocumentsPanel.js';
@@ -141,7 +141,8 @@ interface WorkspacesPageProps {
   handleAddRepo: (wsName: string, repoPath: string) => Promise<void>;
   showToast?: (message: string, type?: 'success' | 'error' | 'info', duration?: number) => void;
   sessionProps: Omit<ComponentProps<typeof SessionHistory>, 'ws'>;
-  changesProps: Omit<ComponentProps<typeof ChangesViewer>, 'ws'>;
+  /** What Code needs to commit, finish and sync, plus the change listing the overview counts files from. */
+  changesProps: Omit<ComponentProps<typeof CodeSection>, 'ws' | 'active' | 'showToast'> & { gitChanges: { repoName: string; files?: unknown[] }[] };
   knowledgeProps: Omit<ComponentProps<typeof KnowledgeBase>, 'ws'>;
   planProps: ComponentProps<typeof ImplementationPlan>;
 }
@@ -540,10 +541,11 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     }
   };
 
+  const { gitChanges: overviewChanges, ...codeSectionProps } = changesProps;
   const repoRows = selected
     ? selected.repos.map((rp) => {
         const name = repoName(rp);
-        const change = changesProps.gitChanges?.find((c: { repoName: string; files?: unknown[] }) => c.repoName === name);
+        const change = overviewChanges?.find((c: { repoName: string; files?: unknown[] }) => c.repoName === name);
         const changedCount: number | null = change ? change.files?.length ?? 0 : null;
         return { name, path: rp, changedCount };
       })
@@ -603,6 +605,18 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     const totalChangedFiles = st?.changedFiles ?? 0;
     const showPanel = subTab !== 'chat';
     const showChat = !archived && (subTab === 'chat' || (roomBeside && !layout.hidden));
+
+    const panelActions = <>
+      {roomBeside && !archived && (
+        <IconButton
+          size="sm"
+          label={layout.hidden ? 'Show the chat beside this' : 'Hide the chat and give this the whole width'}
+          icon={layout.hidden ? <PanelLeftOpen /> : <PanelLeftClose />}
+          onClick={() => chatLayout.toggleHidden()}
+        />
+      )}
+      {!archived && <IconButton size="sm" label="Close this panel and give the chat the whole screen" icon={<X />} onClick={() => onSelectTab(selected.branchName, 'chat')} />}
+    </>;
 
     return (
       <div className="flex h-full min-h-0 min-w-0 flex-col w-full">
@@ -729,20 +743,29 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
             />
           )}
           {showPanel && (
-          <div className="relative min-w-0 flex-1 overflow-y-auto">
-            {/* What is open, and the way back to the chat, which is always one click: the cross, or the rail item again. */}
-            <div className="sticky top-0 z-10 flex items-center gap-0.5 border-b border-border/60 bg-background/95 px-6 py-1.5 backdrop-blur">
+          <div className="relative flex min-w-0 flex-1 flex-col">
+            {/* What is open, and the way back to the chat, which is always one click: the cross, or the rail item again.
+                Code and Docs carry these in their own toolbars, so each spends one row on controls instead of two. */}
+            {subTab !== 'changes' && subTab !== 'documents' && (
+            <div className="z-10 flex shrink-0 items-center gap-0.5 border-b border-border/60 bg-background/95 px-6 py-1.5 backdrop-blur">
               {/* A label, not a heading: the part below names itself, and its region carries the same name. */}
               <p className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{SECTION_LABELS[subTab]}</p>
-              {roomBeside && !archived && (
-                <IconButton
-                  label={layout.hidden ? 'Show the chat beside this' : 'Hide the chat and give this the whole width'}
-                  icon={layout.hidden ? <PanelLeftOpen /> : <PanelLeftClose />}
-                  onClick={() => chatLayout.toggleHidden()}
-                />
-              )}
-              {!archived && <IconButton label="Close this panel and give the chat the whole screen" icon={<X />} onClick={() => onSelectTab(selected.branchName, 'chat')} />}
+              {panelActions}
             </div>
+            )}
+          {/* Code fills the panel: its tree and its file scroll on their own, so it is not inside the page's scroll.
+              It stays mounted once opened, so going to the plan and back keeps the open file and the folders. */}
+          {visitedSections.has('changes') && !archived && (
+            <div role="region" aria-label={SECTION_LABELS.changes} hidden={subTab !== 'changes'} className="min-h-0 flex-1">
+              <CodeSection key={selected.branchName} ws={selected} active={subTab === 'changes'} {...codeSectionProps} showToast={showToast} panelActions={panelActions} />
+            </div>
+          )}
+          {visitedSections.has('documents') && (
+            <div role="region" aria-label={SECTION_LABELS.documents} hidden={subTab !== 'documents'} className="min-h-0 flex-1">
+              <RootDocumentsPanel key={selected.branchName} workspaceId={selected.branchName} workspacePath={selected.workspacePath} panelActions={panelActions} />
+            </div>
+          )}
+          <div hidden={subTab === 'changes' || subTab === 'documents'} className="min-h-0 flex-1 overflow-y-auto">
         <div className="px-6 pb-12 pt-5">
           {/* Legacy Migration Alert Banner */}
           {isLegacy && (
@@ -1323,10 +1346,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />
                 </section>
               )}
-              {visitedSections.has('documents') && <div hidden={subTab !== 'documents'}>
-                <RootDocumentsPanel key={selected.branchName} workspaceId={selected.branchName} workspacePath={selected.workspacePath} />
-              </div>}
-              {subTab === 'changes' && <ChangesViewer key={selected.branchName} ws={selected} {...changesProps} />}
               {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} readOnly={archived} />}
               {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}
               {visitedSections.has('plan') && <div hidden={subTab !== 'plan'} className="space-y-6">
@@ -1339,6 +1358,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               {subTab === 'services' && <ServiceConsole ws={selected} />}
           </div>
         </div>
+          </div>
           </div>
           )}
           <WorkspaceRail workspaceId={selected.branchName} section={subTab} archived={archived} badges={{ changes: totalChangedFiles, skills: activeSkills.length }} />
