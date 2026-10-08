@@ -71,6 +71,27 @@ export function judgeDockLanding(state: unknown): DockLanding {
   return mark < issued ? 'stale' : 'current';
 }
 
+/** What the chat slot does with a landing: nothing, move on to the chat the user is on, or open the chat the address names. */
+export type DockLandingAction = 'ignore' | 'redirect' | 'reveal';
+
+/**
+ * The one rule for turning an address into an open chat. A stale landing is ignored. The dock's newest landing on a chat
+ * that is not open is for one the user has closed since, so it is moved on to the chat they are on (or left alone when
+ * there is none) instead of reopening it. Anything else, a typed address, a link or Back, opens the chat it names.
+ */
+export function dockLandingAction(
+  landing: DockLanding,
+  workspaceId: string,
+  openTabs: readonly string[],
+  activeTab: string | null,
+): DockLandingAction {
+  if (landing === 'stale') return 'ignore';
+  if (landing === 'current' && !openTabs.includes(workspaceId)) {
+    return activeTab && activeTab !== workspaceId ? 'redirect' : 'ignore';
+  }
+  return 'reveal';
+}
+
 /**
  * The address the browser is at now. Unlike the router's own copy, it changes the moment a
  * navigation is made, so it says where the user is going, not where the page last rendered.
@@ -79,10 +100,22 @@ export function browserPath(hash: string = typeof window === 'undefined' ? '' : 
   return hash.replace(/^#/, '').split(/[?#]/)[0] ?? '';
 }
 
+/** Where a part of a workspace is. The chat has its own address; every other part is named after it. */
+export function workspacePath(branchName: string, section = 'chat'): string {
+  return section === 'chat' ? chatPath(branchName) : `/workspaces/${encodeURIComponent(branchName)}/${encodeURIComponent(section)}`;
+}
+
+/**
+ * Where choosing a workspace from the sidebar goes: the same part of that workspace as the one being read, or its chat
+ * from any other page. The session shortcuts use the same rule, so a click and a key land in the same place.
+ */
+export function pathForSwitchingTo(branchName: string, currentPathname: string): string {
+  return workspacePath(branchName, parseWorkspacePath(currentPathname)?.section ?? 'chat');
+}
+
 /** Goes to a part of a workspace as the dock: marked, so its landing can be told from the user's own. */
 export function goToWorkspace(navigate: NavigateFunction, branchName: string, section = 'chat', options: { replace?: boolean } = {}): void {
-  const path = section === 'chat' ? chatPath(branchName) : `/workspaces/${encodeURIComponent(branchName)}/${encodeURIComponent(section)}`;
-  navigate(path, { replace: options.replace ?? false, state: dockNavigationState() });
+  navigate(workspacePath(branchName, section), { replace: options.replace ?? false, state: dockNavigationState() });
 }
 
 /** Goes to a workspace's chat as the dock. */

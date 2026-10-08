@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { MilestoneFact, ProgressFacts, WorkGuidance } from '../../types.js';
-import { sortThreads, threadNote, threadSummary } from './chatThreads.js';
+import { shouldReadThreads, threadSummary } from './chatThreads.js';
 
 const milestone = (id: string, state: MilestoneFact['state'], title = id): MilestoneFact => ({ id, title, state }) as MilestoneFact;
 
@@ -65,25 +65,17 @@ describe('threadSummary', () => {
   });
 });
 
-describe('sortThreads', () => {
-  it('puts what needs the developer first and finished work last, keeping the opening order inside a group', () => {
-    const tones = [['a', 'done'], ['b', 'ai'], ['c', 'needs'], ['d', 'idle'], ['e', 'ai'], ['f', 'reopened'], ['g', 'needs']] as const;
-    const sorted = sortThreads(tones.map(([branch, tone]) => ({ branch, tone })));
-    expect(sorted.map((thread) => thread.branch)).toEqual(['c', 'g', 'f', 'b', 'e', 'd', 'a']);
+describe('shouldReadThreads', () => {
+  it('reads while the full sidebar is showing in a window that is being looked at', () => {
+    expect(shouldReadThreads({ sidebarExpanded: true, windowAttentive: true })).toBe(true);
   });
 
-  it('does not change its input', () => {
-    const input = [{ tone: 'done' as const }, { tone: 'needs' as const }];
-    sortThreads(input);
-    expect(input[0]!.tone).toBe('done');
+  it('does not read for the rail, which shows no summaries', () => {
+    expect(shouldReadThreads({ sidebarExpanded: false, windowAttentive: true })).toBe(false);
   });
-});
 
-describe('threadNote', () => {
-  it('joins the parts that exist', () => {
-    expect(threadNote({ goal: 'Make it central', label: 'In progress' })).toBe('Make it central. In progress');
-    expect(threadNote({ goal: '', label: 'In progress' })).toBe('In progress');
-    expect(threadNote({ goal: '', label: '' })).toBe('');
-    expect(threadNote({ goal: 'Import', label: 'Waiting for you', question: 'Which format?' })).toBe('Import. Waiting for you: Which format?');
+  it('does not read in a window nobody is looking at', () => {
+    expect(shouldReadThreads({ sidebarExpanded: true, windowAttentive: false })).toBe(false);
+    expect(shouldReadThreads({ sidebarExpanded: false, windowAttentive: false })).toBe(false);
   });
 });

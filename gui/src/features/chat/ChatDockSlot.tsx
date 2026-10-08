@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import { chatDockSlot } from './dockPlacement.js';
-import { goToWorkspace, judgeDockLanding, type DockLanding } from './chatRoute.js';
+import { dockLandingAction, goToWorkspace, judgeDockLanding, type DockLanding } from './chatRoute.js';
 import { floatingChatStore } from './floatingChatStore.js';
 
 /**
@@ -29,15 +29,14 @@ export function ChatDockSlot() {
   useEffect(() => {
     if (!workspaceId) return;
     if (judged.current?.key !== location.key) judged.current = { key: location.key, landing: judgeDockLanding(location.state) };
-    const { landing } = judged.current;
-    if (landing === 'stale') return;
     const { openTabs, activeTab } = floatingChatStore.getState();
-    if (landing === 'current' && !openTabs.includes(workspaceId)) {
+    const action = dockLandingAction(judged.current.landing, workspaceId, openTabs, activeTab);
+    if (action === 'redirect') {
       // The part open beside the chat stays open for the chat the user is on.
-      if (activeTab && activeTab !== workspaceId) goToWorkspace(navigate, activeTab, tab ?? 'chat', { replace: true });
-      return;
+      goToWorkspace(navigate, activeTab!, tab ?? 'chat', { replace: true });
+    } else if (action === 'reveal') {
+      floatingChatStore.reveal(workspaceId);
     }
-    floatingChatStore.reveal(workspaceId);
   }, [workspaceId, tab, location.key, location.state, navigate]);
   // Stable, so React does not detach and reattach the slot on every render, which would hide the dock for a moment.
   const attach = useCallback((element: HTMLDivElement | null) => { chatDockSlot.set(element); }, []);

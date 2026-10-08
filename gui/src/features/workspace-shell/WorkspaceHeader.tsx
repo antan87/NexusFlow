@@ -67,16 +67,17 @@ export function WorkspaceHeader({ workspaceId, title, branchName, brief, mode, r
             </button>}
             <span className="text-xs text-muted-foreground">{mode === 'in-place' ? 'In place' : 'Worktree'} · {repoCount} {repoCount === 1 ? 'repository' : 'repositories'}</span>
           </div>
-          {brief && !compact && <p className="mt-0.5 line-clamp-2 max-w-3xl text-sm text-muted-foreground">{brief}</p>}
         </div>
         {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
       </div>
+      {/* Below the title row, not beside the actions, so a narrow screen gives it the whole width. */}
+      {brief && !compact && <p className="mt-1 line-clamp-2 max-w-3xl text-sm text-muted-foreground">{brief}</p>}
 
       {!compact && <div aria-label="Task status" role="group" className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
         {stage && <Fact label="Stage" to={`${base}/plan`}>{STAGE_LABELS[stage]}</Fact>}
         {next ? (
           <Fact label="Next" to={`${base}/plan`}>
-            <span className="inline-flex max-w-[28ch] items-center gap-1 truncate sm:max-w-[40ch]" title={next.title}><ArrowRight aria-hidden="true" size={12} />{next.title}</span>
+            <span className="inline-flex min-w-0 max-w-[28ch] items-center gap-1 sm:max-w-[40ch]" title={next.title}><ArrowRight aria-hidden="true" size={12} className="shrink-0" /><span className="truncate">{next.title}</span></span>
           </Fact>
         ) : done ? <Fact label="Milestones">All done</Fact> : null}
         <Fact label="Changes" to={`${base}/changes`}>

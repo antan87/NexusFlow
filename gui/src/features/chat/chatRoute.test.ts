@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { chatPath, parseWorkspacePath, showsChatFor, showsChatOf } from './chatRoute';
+import { chatPath, dockLandingAction, parseWorkspacePath, pathForSwitchingTo, showsChatFor, showsChatOf, workspacePath } from './chatRoute';
 
 describe('chatPath', () => {
   it('names the chat section of a workspace, encoding its name', () => {
@@ -150,5 +150,67 @@ describe('showsChatFor', () => {
   it('agrees with showsChatOf about the chat section itself', () => {
     expect(showsChatOf('/workspaces/alpha/plan', 'alpha')).toBe(false);
     expect(showsChatOf('/workspaces/alpha', 'alpha')).toBe(true);
+  });
+});
+
+describe('dockLandingAction', () => {
+  const open = ['alpha', 'beta'];
+
+  it('opens the chat an address names when the user got there themselves, open or not', () => {
+    expect(dockLandingAction('external', 'alpha', open, 'beta')).toBe('reveal');
+    expect(dockLandingAction('external', 'gamma', open, 'beta')).toBe('reveal');
+    expect(dockLandingAction('external', 'gamma', [], null)).toBe('reveal');
+  });
+
+  it('follows the dock\'s own newest navigation to a chat that is open', () => {
+    expect(dockLandingAction('current', 'alpha', open, 'beta')).toBe('reveal');
+  });
+
+  it('does not reopen a chat the user closed after the dock navigated to it, and moves on to the chat they are on', () => {
+    expect(dockLandingAction('current', 'gamma', open, 'beta')).toBe('redirect');
+  });
+
+  it('leaves the address alone when a closed chat is the dock\'s newest landing and no other chat is on screen', () => {
+    expect(dockLandingAction('current', 'gamma', [], null)).toBe('ignore');
+    expect(dockLandingAction('current', 'gamma', open, 'gamma')).toBe('ignore');
+  });
+
+  it('ignores a landing a newer navigation has replaced, open chat or not, so it can add no tab', () => {
+    expect(dockLandingAction('stale', 'alpha', open, 'beta')).toBe('ignore');
+    expect(dockLandingAction('stale', 'gamma', open, 'beta')).toBe('ignore');
+    expect(dockLandingAction('stale', 'gamma', [], null)).toBe('ignore');
+  });
+});
+
+describe('workspacePath', () => {
+  it('gives the chat its own address and names every other part after it', () => {
+    expect(workspacePath('alpha')).toBe('/workspaces/alpha/chat');
+    expect(workspacePath('alpha', 'chat')).toBe('/workspaces/alpha/chat');
+    expect(workspacePath('alpha', 'plan')).toBe('/workspaces/alpha/plan');
+    expect(workspacePath('feature/x y', 'changes')).toBe('/workspaces/feature%2Fx%20y/changes');
+  });
+});
+
+describe('pathForSwitchingTo', () => {
+  it('keeps the part being read, for the other workspace', () => {
+    expect(pathForSwitchingTo('beta', '/workspaces/alpha/plan')).toBe('/workspaces/beta/plan');
+    expect(pathForSwitchingTo('beta', '/workspaces/alpha/changes')).toBe('/workspaces/beta/changes');
+    expect(pathForSwitchingTo('beta', '/workspaces/alpha/chat')).toBe('/workspaces/beta/chat');
+  });
+
+  it('opens the chat from a page that is not a workspace, or a workspace with no part named', () => {
+    expect(pathForSwitchingTo('beta', '/overview')).toBe('/workspaces/beta/chat');
+    expect(pathForSwitchingTo('beta', '/workspaces/alpha')).toBe('/workspaces/beta/chat');
+    expect(pathForSwitchingTo('beta', '/settings')).toBe('/workspaces/beta/chat');
+  });
+
+  it('is not fooled by a workspace whose name starts with chat', () => {
+    // The old rule asked whether the address contained "/chat", which is true here though the user is reading the plan.
+    expect(pathForSwitchingTo('beta', '/workspaces/chat-fix/plan')).toBe('/workspaces/beta/plan');
+    expect(pathForSwitchingTo('chat-fix', '/workspaces/alpha/plan')).toBe('/workspaces/chat-fix/plan');
+  });
+
+  it('encodes the workspace it goes to', () => {
+    expect(pathForSwitchingTo('feature/x y', '/workspaces/alpha/plan')).toBe('/workspaces/feature%2Fx%20y/plan');
   });
 });

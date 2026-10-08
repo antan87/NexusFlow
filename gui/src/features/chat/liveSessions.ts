@@ -1,6 +1,6 @@
 /**
  * Where each CLI is running, from the server's own list of running terminals. Pure, so the rules can be tested
- * without a DOM. A workspace with a CLI is marked in the sidebar, on its chat tab and in the list of chats, so the
+ * without a DOM. A workspace with a CLI is marked in the sidebar, on its open session and in the rail, so the
  * developer never has to open a workspace to learn whether something is running in it.
  */
 

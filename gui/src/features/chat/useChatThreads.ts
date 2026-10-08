@@ -5,8 +5,8 @@ import { useFloatingChat } from './floatingChatStore.js';
 import { useChatAttention } from './useChatAttention.js';
 
 /**
- * What every open chat is working on and where it stands, for the chat's tabs, its list of chats and the sidebar.
- * Only the chat reads (`read`), and only while it is on screen; everyone else is shown what it last read.
+ * What every open chat is working on and where it stands, for the sidebar's open sessions.
+ * Whoever shows it decides when it is read (`read`, see `shouldReadThreads`); with `read` off it is what was last read.
  */
 export function useChatThreads(workspaces: readonly Feature[], read: boolean): {
   summaries: ReadonlyMap<string, ThreadSummary>;

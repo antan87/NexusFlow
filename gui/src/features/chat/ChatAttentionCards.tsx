@@ -17,8 +17,8 @@ const MAX_CARDS = 4;
  * moment they most need it.
  *
  * Shown only while the chat is off screen. With the chat in view the cards would
- * sit on its tabs and hide them; there the amber tabs and the "waiting" chip
- * above them carry the signal.
+ * cover it; there the sidebar carries the signal, as each waiting session shows
+ * its question.
  */
 export function ChatAttentionCards({ workspaces = [] }: { workspaces?: readonly Feature[] }) {
   const { openCli } = useFloatingChat();
@@ -91,7 +91,7 @@ export function ChatAttentionCards({ workspaces = [] }: { workspaces?: readonly 
       ))}
       {hidden > 0 && (
         <p className="rounded-lg border border-amber-500/40 bg-card px-3 py-1.5 text-center text-[11px] text-muted-foreground shadow">
-          {hidden} more {hidden === 1 ? 'chat is' : 'chats are'} waiting. Open the CLI chat to see {hidden === 1 ? 'it' : 'them'}.
+          {hidden} more {hidden === 1 ? 'chat is' : 'chats are'} waiting. {hidden === 1 ? 'It is' : 'They are'} marked in the sidebar.
         </p>
       )}
     </section>

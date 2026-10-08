@@ -99,10 +99,16 @@ function updateState(updater: (prev: FloatingChatState) => FloatingChatState) {
 const focused = (state: FloatingChatState): FloatingChatState => ({ ...state, focusRequest: state.focusRequest + 1 });
 
 /**
- * The tabs in the order they were last used, the one on screen first. Switching workspaces, from the sidebar or a link,
- * then visibly brings that chat to the front, instead of leaving the first chat ever opened in first place.
+ * The tab to show when `closed` goes: the one before it, else the one after, so the order the user set up is
+ * respected. The docked workspace is already on screen beside it, so it is only chosen when nothing else is left.
  */
-const toFront = (tabs: readonly string[], branchName: string) => [branchName, ...tabs.filter((tab) => tab !== branchName)];
+function neighbourOf(tabs: readonly string[], closed: string, docked: string | null): string | null {
+  const index = tabs.indexOf(closed);
+  const others = tabs.map((tab, position) => ({ tab, distance: Math.abs(position - index), position })).filter(({ tab }) => tab !== closed);
+  // Nearest to the one closed; at the same distance, the one before it.
+  const nearest = others.sort((a, b) => a.distance - b.distance || a.position - b.position);
+  return (nearest.find(({ tab }) => tab !== docked) ?? nearest[0])?.tab ?? null;
+}
 
 export const floatingChatStore = {
   getState: () => currentState,
@@ -162,9 +168,11 @@ export const floatingChatStore = {
         activeTab = openTabs[0];
       }
 
+      const nextOpenTabs = activeTab && !openTabs.includes(activeTab) ? [...openTabs, activeTab] : openTabs;
+
       return focused({
         ...prev,
-        openTabs: activeTab ? toFront(openTabs, activeTab) : openTabs,
+        openTabs: nextOpenTabs,
         activeTab,
         modes: branchName && mode ? { ...prev.modes, [branchName]: mode } : prev.modes,
         splitTab: activeTab === prev.splitTab ? prev.activeTab : prev.splitTab,
@@ -179,10 +187,10 @@ export const floatingChatStore = {
   reveal: (branchName: string) => {
     updateState((prev) => {
       const present = prev.openTabs.includes(branchName);
-      if (present && prev.activeTab === branchName && prev.openTabs[0] === branchName) return prev;
+      if (present && prev.activeTab === branchName) return prev;
       return {
         ...prev,
-        openTabs: toFront(prev.openTabs, branchName),
+        openTabs: present ? prev.openTabs : [...prev.openTabs, branchName],
         activeTab: branchName,
         splitTab: branchName === prev.splitTab ? prev.activeTab : prev.splitTab,
       };
@@ -192,7 +200,7 @@ export const floatingChatStore = {
   addTab: (branchName: string) => {
     updateState((prev) => focused({
       ...prev,
-      openTabs: toFront(prev.openTabs, branchName),
+      openTabs: prev.openTabs.includes(branchName) ? prev.openTabs : [...prev.openTabs, branchName],
       activeTab: branchName,
       splitTab: branchName === prev.splitTab ? prev.activeTab : prev.splitTab,
     }));
@@ -204,7 +212,7 @@ export const floatingChatStore = {
       if (!prev.openTabs.includes(branchName)) return prev;
       const openTabs = prev.openTabs.filter((t) => t !== branchName);
       let activeTab = prev.activeTab;
-      if (activeTab === branchName) activeTab = openTabs.find(tab => tab !== prev.splitTab) ?? openTabs[0] ?? null;
+      if (activeTab === branchName) activeTab = neighbourOf(prev.openTabs, branchName, prev.splitTab);
       const next = {
         ...prev,
         openTabs,
@@ -220,7 +228,7 @@ export const floatingChatStore = {
       if (!prev.openTabs.includes(branchName)) return prev;
       return focused({
         ...prev,
-        openTabs: toFront(prev.openTabs, branchName),
+        openTabs: prev.openTabs,
         activeTab: branchName,
         splitTab: branchName === prev.splitTab ? prev.activeTab : prev.splitTab,
       });

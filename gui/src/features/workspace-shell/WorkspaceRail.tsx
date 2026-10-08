@@ -33,8 +33,11 @@ interface WorkspaceRailProps {
 export function WorkspaceRail({ workspaceId, section, archived = false, badges = {} }: WorkspaceRailProps) {
   const base = `/workspaces/${encodeURIComponent(workspaceId)}`;
   return (
-    <nav aria-label="Workspace" className="flex w-16 shrink-0 flex-col border-l border-border bg-card/60 py-1.5">
-      <ul className="flex flex-col gap-0.5 px-0.5">
+    <nav
+      aria-label="Workspace"
+      className="fixed inset-x-0 bottom-0 z-30 flex shrink-0 border-t border-border bg-card/95 backdrop-blur md:static md:inset-auto md:z-auto md:w-16 md:flex-col md:border-l md:border-t-0 md:bg-card/60 md:py-1.5 md:backdrop-blur-none"
+    >
+      <ul className="flex w-full flex-row justify-around gap-0.5 px-1 py-1 md:flex-col md:justify-start md:px-0.5 md:py-0">
         {railSectionsFor(archived).map((candidate) => {
           const item = ITEMS[candidate];
           if (!item) return null;
@@ -44,7 +47,7 @@ export function WorkspaceRail({ workspaceId, section, archived = false, badges =
           // An archived workspace has no chat to go back to, so its open part stays open.
           const to = active && !archived ? `${base}/chat` : `${base}/${candidate}`;
           return (
-            <li key={candidate}>
+            <li key={candidate} className="min-w-0 flex-1 md:flex-none">
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -52,7 +55,7 @@ export function WorkspaceRail({ workspaceId, section, archived = false, badges =
                       to={to} aria-current={active ? 'page' : undefined}
                       aria-label={count ? `${item.label}, ${count}` : item.label}
                       className={cn(
-                        'relative flex flex-col items-center gap-1 rounded-md px-0.5 py-1.5 text-[10px] leading-none transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
+                        'relative flex h-12 flex-col items-center justify-center gap-1 rounded-md px-0.5 text-[10px] leading-none transition-colors md:h-auto md:justify-start md:py-1.5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
                         active ? 'bg-secondary font-semibold text-foreground' : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
                       )}
                     />

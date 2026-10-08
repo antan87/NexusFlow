@@ -74,7 +74,7 @@ describe('revealing a chat because the address says so', () => {
     store.reveal('alpha');
     expect(store.getState()).toMatchObject({ openTabs: ['alpha'], activeTab: 'alpha', focusRequest: 0 });
     store.reveal('beta');
-    expect(store.getState()).toMatchObject({ openTabs: ['beta', 'alpha'], activeTab: 'beta', focusRequest: 0 });
+    expect(store.getState()).toMatchObject({ openTabs: ['alpha', 'beta'], activeTab: 'beta', focusRequest: 0 });
   });
 
   it('leaves everything alone, and wakes nobody, when that chat is already the active one', async () => {
@@ -117,28 +117,74 @@ describe('switching and closing tabs', () => {
     expect(store.getState()).toMatchObject({ openTabs: ['beta'], activeTab: 'beta', focusRequest: before });
   });
 
-  it('closing the tab on screen brings up the one used before it and asks to see it', async () => {
+  it('closing the tab on screen brings up the adjacent tab and asks to see it', async () => {
     const { floatingChatStore: store } = await load();
     store.open('alpha'); store.open('beta'); store.open('gamma');
     const before = store.getState().focusRequest;
     store.removeTab('gamma');
-    expect(store.getState()).toMatchObject({ openTabs: ['beta', 'alpha'], activeTab: 'beta', focusRequest: before + 1 });
+    expect(store.getState()).toMatchObject({ openTabs: ['alpha', 'beta'], activeTab: 'beta', focusRequest: before + 1 });
   });
 
-  it('keeps the chat on screen first and the others in the order they were last used', async () => {
+  it('closing the first tab on screen brings up the one after it', async () => {
     const { floatingChatStore: store } = await load();
     store.open('alpha'); store.open('beta'); store.open('gamma');
-    expect(store.getState().openTabs).toEqual(['gamma', 'beta', 'alpha']);
-    // However a chat comes to the front: chosen, revealed by its address, or added again.
     store.setActiveTab('alpha');
-    expect(store.getState().openTabs).toEqual(['alpha', 'gamma', 'beta']);
+    store.removeTab('alpha');
+    expect(store.getState()).toMatchObject({ openTabs: ['beta', 'gamma'], activeTab: 'beta' });
+  });
+
+  it('closing the tab on screen keeps the docked workspace docked when another tab can take its place', async () => {
+    const { floatingChatStore: store } = await load();
+    store.open('alpha'); store.open('beta'); store.open('gamma');
+    store.setSplitTab('beta');
+    store.removeTab('gamma');
+    // Beta is the neighbour, but it is already on screen beside it, so alpha is shown and beta stays docked.
+    expect(store.getState()).toMatchObject({ openTabs: ['alpha', 'beta'], activeTab: 'alpha', splitTab: 'beta' });
+  });
+
+  it('closing the tab on screen, with the one before it docked, brings up the one right after it, not one further back', async () => {
+    const { floatingChatStore: store } = await load();
+    store.open('alpha'); store.open('beta'); store.open('gamma'); store.open('delta');
+    store.setSplitTab('beta');
+    store.setActiveTab('gamma');
+    store.removeTab('gamma');
+    expect(store.getState()).toMatchObject({ openTabs: ['alpha', 'beta', 'delta'], activeTab: 'delta', splitTab: 'beta' });
+  });
+
+  it('closing the tab on screen shows the docked workspace when it is all that is left', async () => {
+    const { floatingChatStore: store } = await load();
+    store.open('alpha'); store.open('beta');
+    store.setSplitTab('alpha');
+    store.removeTab('beta');
+    expect(store.getState()).toMatchObject({ openTabs: ['alpha'], activeTab: 'alpha', splitTab: null });
+  });
+
+  it('closing a tab that is not on screen leaves the one on screen and the docked one alone', async () => {
+    const { floatingChatStore: store } = await load();
+    store.open('alpha'); store.open('beta'); store.open('gamma');
+    store.setSplitTab('beta');
+    const before = store.getState().focusRequest;
+    store.removeTab('alpha');
+    expect(store.getState()).toMatchObject({ openTabs: ['beta', 'gamma'], activeTab: 'gamma', splitTab: 'beta', focusRequest: before });
+  });
+
+  it('keeps tabs in stable order and updates activeTab without shifting positions', async () => {
+    const { floatingChatStore: store } = await load();
+    store.open('alpha'); store.open('beta'); store.open('gamma');
+    expect(store.getState().openTabs).toEqual(['alpha', 'beta', 'gamma']);
+    // When activating, revealing, or adding again, stable order is preserved
+    store.setActiveTab('alpha');
+    expect(store.getState().openTabs).toEqual(['alpha', 'beta', 'gamma']);
+    expect(store.getState().activeTab).toBe('alpha');
     store.reveal('beta');
-    expect(store.getState().openTabs).toEqual(['beta', 'alpha', 'gamma']);
+    expect(store.getState().openTabs).toEqual(['alpha', 'beta', 'gamma']);
+    expect(store.getState().activeTab).toBe('beta');
     store.addTab('gamma');
-    expect(store.getState().openTabs).toEqual(['gamma', 'beta', 'alpha']);
-    // A chat that is not open is not brought anywhere.
+    expect(store.getState().openTabs).toEqual(['alpha', 'beta', 'gamma']);
+    expect(store.getState().activeTab).toBe('gamma');
+    // A chat that is not open is not added or changed
     store.setActiveTab('delta');
-    expect(store.getState().openTabs).toEqual(['gamma', 'beta', 'alpha']);
+    expect(store.getState().openTabs).toEqual(['alpha', 'beta', 'gamma']);
   });
 
   it('closing the last tab leaves no chat to show and asks for nothing', async () => {
@@ -224,7 +270,7 @@ describe('saved state', () => {
     store.openTerminal('alpha', 'claude', 's1');
     store.openDraft('beta', 'text');
     const saved = JSON.parse(storage.data.get(FLOATING_CHAT_STORAGE_KEY)!);
-    expect(saved.openTabs).toEqual(['beta', 'alpha']);
+    expect(saved.openTabs).toEqual(['alpha', 'beta']);
     expect(saved.focusRequest).toBe(0);
     expect(saved.terminalLaunches).toEqual({});
     expect(saved.drafts).toEqual({});
@@ -234,7 +280,7 @@ describe('saved state', () => {
     const first = await load();
     first.floatingChatStore.open('alpha'); first.floatingChatStore.open('beta');
     const second = await load({ [FLOATING_CHAT_STORAGE_KEY]: first.storage.data.get(FLOATING_CHAT_STORAGE_KEY)! });
-    expect(second.floatingChatStore.getState()).toMatchObject({ openTabs: ['beta', 'alpha'], activeTab: 'beta', focusRequest: 0 });
+    expect(second.floatingChatStore.getState()).toMatchObject({ openTabs: ['alpha', 'beta'], activeTab: 'beta', focusRequest: 0 });
   });
 
   it('ignores what the floating window saved, and cleans up what it reads', async () => {
