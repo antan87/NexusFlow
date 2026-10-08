@@ -84,6 +84,7 @@ export interface AppSidebarProps {
   workspaceStatuses?: Record<string, WorkspaceStatus>;
   workspacesLoading?: boolean;
   activeWsId?: string | null;
+  /** Told when a workspace is chosen, so the sheet can close. The links go to their own addresses; this does not navigate. */
   onSelectWorkspace?: (id: string) => void;
   /** Checks for a new version on request; updates never install without confirmation. */
   onCheckForUpdates?: () => void;

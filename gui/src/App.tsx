@@ -1159,7 +1159,6 @@ Core Instructions:
         workspaceStatuses={workspaceStatuses}
         workspacesLoading={workspacesLoading}
         activeWsId={activeWsId}
-        onSelectWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
         onCheckForUpdates={() => { void handleCheckForUpdates(); }}
         checkingForUpdates={['checking', 'downloading'].includes(updateStatus?.nativeStatus ?? '')}
       />

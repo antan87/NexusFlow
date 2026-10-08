@@ -74,6 +74,17 @@ test.describe('the open sessions in the sidebar', () => {
     }
   });
 
+  test('are one step in the history each, so Back returns to the session before', async ({ page }) => {
+    await openAll(page);
+    const length = () => page.evaluate(() => history.length);
+    const before = await length();
+    await session(page, 'alpha').click();
+    await expect(page).toHaveURL(/#\/workspaces\/alpha\/chat$/);
+    expect(await length()).toBe(before + 1);
+    await page.goBack();
+    await expect(page).toHaveURL(/#\/workspaces\/gamma\/chat$/);
+  });
+
   test('keep the part of the workspace being read when another one is chosen', async ({ page }) => {
     await openAll(page);
     await page.goto('/#/workspaces/alpha/plan');
@@ -159,11 +170,17 @@ test.describe('the keyboard', () => {
     await focusTerminal(page);
     // Alt and the left and right arrows move by word in a shell, Alt and [ starts an escape sequence, Alt and a letter
     // is a shell binding, and there is no fourth session for Alt and 4: the app takes none of them.
-    for (const key of ['Alt+ArrowLeft', 'Alt+ArrowRight', 'Alt+BracketLeft', 'Alt+BracketRight', 'Alt+4', 'Alt+KeyB']) {
+    // On a Mac the terminal does not treat Option as Meta, so Option and a bracket, a digit or a letter types a special
+    // character that never reaches the shell as a key. Only the arrows are checked there; the app takes none of them
+    // either way, which the address below shows.
+    const keys = ['Alt+ArrowLeft', 'Alt+ArrowRight', ...(process.platform === 'darwin' ? [] : ['Alt+BracketLeft', 'Alt+BracketRight', 'Alt+4', 'Alt+KeyB'])];
+    for (const key of keys) {
       const before = sentToShell.length;
       await page.keyboard.press(key);
       await expect.poll(() => sentToShell.length, { message: `${key} should reach the shell` }).toBeGreaterThan(before);
     }
+    // Pressed on every platform: wherever they go, the app does not take them.
+    for (const key of ['Alt+BracketLeft', 'Alt+BracketRight', 'Alt+4', 'Alt+KeyB']) await page.keyboard.press(key);
     await expect(page).toHaveURL(/#\/workspaces\/gamma\/chat$/);
   });
 

@@ -50,7 +50,12 @@ const openChat = async (page: Page, name: string) => {
   await expect(session(page, name)).toBeVisible();
 };
 /** Opens a chat from the sidebar's Resume button, which asks the dock to show it, so the dock moves the address itself. */
-const addChat = (page: Page, name: string) => sidebar(page).getByRole('button', { name: `Resume CLI chat for ${name}` }).click();
+const addChat = async (page: Page, name: string) => {
+  await sidebar(page).getByRole('button', { name: `Resume CLI chat for ${name}` }).click();
+  // The address moves at once, but the page takes a moment to catch up with it. A link clicked in between is judged
+  // against the old location and replaces the history entry instead of adding one, so wait until the page shows it.
+  await expect(session(page, name)).toHaveAttribute('aria-current', 'page', { timeout: 20_000 });
+};
 /** The state of the terminal on screen. While it runs the word is for screen readers only, so the pane is what is visible. */
 const shownState = (page: Page) => chatOf(page).getByTestId('terminal-pane').filter({ visible: true }).getByTestId('terminal-state');
 /** A terminal takes focus once it has attached, and a key pressed then belongs to the terminal, so wait for the one in front to settle first. */
