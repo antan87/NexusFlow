@@ -18,6 +18,8 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.addInitScript(() => {
     if (!localStorage.getItem('contextspace_floating_chat_state_v1')) localStorage.setItem('contextspace_floating_chat_state_v1', JSON.stringify({ openTabs: ['terminal-test'], activeTab: 'terminal-test' }));
   });
+  // Wide enough for Code and Docs to open beside the chat rather than in its place.
+  await page.setViewportSize({ width: 1450, height: 900 });
   await page.goto('/#/workspaces/terminal-test/chat');
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   const pane = page.getByTestId('terminal-pane').filter({ visible: true }).first();
@@ -25,9 +27,10 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await pane.getByRole('group', { name: 'CLI tools' }).getByRole('button', { name: 'Start Shell', exact: true }).click();
   await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
   const openPaneOptions = () => pane.getByRole('button', { name: 'Pane options' }).click();
-  // Code and Docs are inline toolbar buttons, so toggle them directly.
-  // Code is a toolbar button; documents have their place on the workspace rail, and beside the terminal they open
-  // from the CLI's output or with Ctrl+Shift+D.
+  // Code and Docs open on the workspace rail, beside the chat. Code has a toolbar button in the chat; Docs answers to
+  // Ctrl+Shift+D from the terminal. Each opens and closes the same way.
+  const code = page.getByRole('region', { name: 'Workspace code' });
+  const documents = page.getByRole('region', { name: 'Workspace documents' });
   const toggleInspector = async (name: 'Code' | 'Docs') => {
     if (name === 'Code') await chat.getByRole('button', { name, exact: true }).click();
     else { await pane.locator('.xterm-helper-textarea').focus(); await page.keyboard.press('Control+Shift+D'); }
@@ -46,28 +49,33 @@ test('one real shell survives window changes and reload, then stops explicitly',
   const command = process.platform === 'win32' ? "$env:CS_KEEP='42'; Write-Output ('CS_' + 'STARTED')" : 'export CS_KEEP=42; echo CS_STARTED';
   await run(pane, command);
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_STARTED');
-  // The inspector splits beside the terminal, which stays visible.
+  // Code opens beside the terminal, which stays visible and keeps its shell.
   await toggleInspector('Code');
-  await expect(chat.getByRole('separator', { name: 'Resize code panel' })).toHaveCount(1);
+  await expect(page).toHaveURL(/\/workspaces\/terminal-test\/changes$/);
+  await expect(code).toBeVisible();
   await expect(pane).toBeVisible();
   await page.screenshot({ path: 'test-results/terminal-compact-inspector.png' });
   await toggleInspector('Code');
+  await expect(code).toBeHidden();
   await expect(pane).toBeVisible();
   await run(pane, process.platform === 'win32' ? "Write-Output ('CS_' + $env:CS_KEEP + '_CODE')" : 'echo CS_${CS_KEEP}_CODE');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_42_CODE');
   await toggleInspector('Docs');
-  await expect(chat.getByRole('separator', { name: 'Resize documents panel' })).toHaveCount(1);
+  await expect(documents).toBeVisible();
   await expect(pane).toBeVisible();
   await toggleInspector('Docs');
+  await expect(documents).toBeHidden();
   await expect(pane).toBeVisible();
   await run(pane, process.platform === 'win32' ? "Write-Output ('CS_' + $env:CS_KEEP + '_DOCS')" : 'echo CS_${CS_KEEP}_DOCS');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_42_DOCS');
+  // Resizing the chat beside Code resizes the PTY; the shell keeps every keystroke after it.
   await toggleInspector('Code');
-  const separator = chat.getByRole('separator', { name: 'Resize code panel' });
+  const separator = page.getByRole('separator', { name: 'Resize the chat' });
   await expect(separator).toHaveAttribute('aria-orientation', 'vertical');
+  const share = Number(await separator.getAttribute('aria-valuenow'));
   await separator.focus();
   await page.keyboard.press('ArrowLeft');
-  await expect(separator).toHaveAttribute('aria-valuenow', '55');
+  await expect(separator).toHaveAttribute('aria-valuenow', String(share - 3));
   await run(pane, process.platform === 'win32' ? "Write-Output ('CS_' + $env:CS_KEEP + '_WIDE')" : 'echo CS_${CS_KEEP}_WIDE');
   await expect(pane.locator('.xterm-accessibility-tree')).toContainText('CS_42_WIDE');
   await toggleInspector('Code');
@@ -82,7 +90,8 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await page.getByRole('menuitem').filter({ hasText: 'terminal-other' }).click();
   await expect(page.getByTestId('terminal-pane').filter({ visible: true }).first().getByRole('region', { name: 'Start a CLI session' })).toBeVisible();
   await chat.getByRole('tab', { name: /^Show terminal-test/ }).click();
-  await expect(chat.getByRole('separator', { name: 'Resize code panel' })).toHaveCount(1);
+  await expect(page).toHaveURL(/\/workspaces\/terminal-test\/changes$/);
+  await expect(code).toBeVisible();
   await expect(pane).toBeVisible();
   await toggleInspector('Code');
   await page.reload();
