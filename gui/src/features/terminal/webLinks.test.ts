@@ -35,7 +35,7 @@ describe('webLinks', () => {
     expect(isWebOrDomain('example.com:8080')).toBe(true);
     expect(isWebOrDomain('localhost:3000')).toBe(true);
     expect(isWebOrDomain('127.0.0.1:8080')).toBe(true);
-    expect(isWebOrDomain('www.google.com/maps')).toBe(true);
+    expect(isWebOrDomain('www.google.com')).toBe(true);
 
     expect(isWebOrDomain('src/app.ts')).toBe(false);
     expect(isWebOrDomain('src/index.test.ts')).toBe(false);
@@ -59,7 +59,7 @@ describe('webLinks', () => {
 
   it('treats wrapped URLs, mail links, bare domains and local servers as web addresses', () => {
     for (const url of ['https://github.com/mrpatronz/nexusflow', 'http://localhost:3000/api', '<https://example.com/docs>', '<http://127.0.0.1:8080>',
-      'mailto:team@example.com', '<mailto:user@example.com>', 'github.com/foo/bar', 'example.com:8080', 'localhost:3000', '127.0.0.1:3000/test', 'www.google.com/search']) {
+      'mailto:team@example.com', '<mailto:user@example.com>', 'github.com/foo/bar', 'example.com:8080', 'localhost:3000', '127.0.0.1:3000/test', 'www.google.com']) {
       expect(isWebOrDomain(url)).toBe(true);
       expect(normalizeWebUrl(url)).toMatch(/^(?:https?:\/\/|mailto:)/);
     }

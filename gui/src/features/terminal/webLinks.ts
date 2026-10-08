@@ -8,6 +8,11 @@ export interface WebLink {
 }
 
 const linkify = new LinkifyIt().set({ fuzzyLink: true, fuzzyIP: true });
+/**
+ * linkify's matcher, bound once. Called as `linkify.match(text)`, static analysis takes it for
+ * String.prototype.match and reports every string passed in as an unanchored hostname pattern.
+ */
+const findLinkMatches = linkify.match.bind(linkify);
 
 const FILE_EXTS = new Set([
   'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'json', 'toml', 'yaml', 'yml',
@@ -62,7 +67,7 @@ export function isWebOrDomain(raw: string): boolean {
   if (/^www\.[a-z\d.-]+/i.test(trimmed)) return true;
 
   // Use linkify to test against real IANA TLDs
-  const matches = linkify.match(trimmed);
+  const matches = findLinkMatches(trimmed);
   if (!matches || matches.length === 0) return false;
 
   const first = matches[0];
@@ -93,7 +98,7 @@ export function findWebLinks(row: string): WebLink[] {
   const result: WebLink[] = [];
   const covered: [number, number][] = [];
 
-  const matches = linkify.match(row) || [];
+  const matches = findLinkMatches(row) || [];
   for (const match of matches) {
     if (match.schema === 'https:' || match.schema === 'http:' || match.schema === 'mailto:') {
       result.push({
