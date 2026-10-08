@@ -45,7 +45,8 @@ test.beforeEach(async ({ page }) => {
 
 const chatOf = (page: Page) => page.getByRole('region', { name: 'CLI Chat', exact: true });
 const destinations = (page: Page) => page.getByRole('navigation', { name: 'Workspace' });
-const tab = (page: Page, name: string) => chatOf(page).getByRole('tab', { name: new RegExp(`^Show ${name} in the left pane`) });
+/** An open chat is a session in the sidebar; the one on screen is the current page. */
+const session = (page: Page, branch: string) => page.locator(`aside.context-sidebar [data-sidebar-session="${branch}"]`);
 const boxOf = async (locator: ReturnType<typeof chatOf>) => {
   const box = await locator.boundingBox();
   if (!box) throw new Error('no box');
@@ -61,7 +62,7 @@ test.describe('the app opens on the chat', () => {
     await page.goto('/');
     await expect(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
     await expect(chatOf(page)).toBeVisible();
-    await expect(tab(page, 'beta')).toHaveAttribute('aria-selected', 'true');
+    await expect(session(page, 'beta')).toHaveAttribute('aria-current', 'page');
   });
 
   test('on the overview when no chat was open, and the overview is still one click away', async ({ page }) => {
@@ -196,28 +197,27 @@ test.describe('the chat can be hidden for a while, and given more or less room',
 });
 
 test.describe('workspaces are switched from inside the chat', () => {
-  test('tabs are named by the workspace, with the branch as a detail', async ({ page }) => {
+  test('sessions are named by the workspace, with the branch as a detail', async ({ page }) => {
     await page.goto('/#/workspaces/alpha/chat');
-    await expect(tab(page, 'Faster search')).toBeVisible();
-    await expect(tab(page, 'Faster search')).toHaveAttribute('title', 'Faster search (alpha)');
+    await expect(session(page, 'alpha')).toContainText('Faster search');
+    await expect(session(page, 'alpha').getByText('Faster search', { exact: true })).toHaveAttribute('title', 'Faster search');
     // A workspace without a name is known by its branch.
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /Faster search/ }).waitFor();
-    await page.getByRole('menuitem', { name: /beta/ }).click();
-    await expect(tab(page, 'beta')).toBeVisible();
+    await page.goto('/#/workspaces/beta/chat');
+    await expect(session(page, 'beta')).toContainText('beta');
   });
 
   test('switching keeps the part you are reading, now for the other workspace', async ({ page }) => {
+    await page.goto('/#/workspaces/beta/chat');
+    await expect(session(page, 'beta')).toBeVisible();
     await page.goto('/#/workspaces/alpha/plan');
     await expect(chatOf(page)).toBeVisible();
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /beta/ }).click();
+    await session(page, 'beta').click();
     await expect(page).toHaveURL(/#\/workspaces\/beta\/plan$/);
-    await expect(tab(page, 'beta')).toHaveAttribute('aria-selected', 'true');
+    await expect(session(page, 'beta')).toHaveAttribute('aria-current', 'page');
     await expect(page.getByRole('region', { name: 'Goal', exact: true })).toBeVisible();
-    await tab(page, 'Faster search').click();
+    await session(page, 'alpha').click();
     await expect(page).toHaveURL(/#\/workspaces\/alpha\/plan$/);
-    await expect(tab(page, 'Faster search')).toHaveAttribute('aria-selected', 'true');
+    await expect(session(page, 'alpha')).toHaveAttribute('aria-current', 'page');
   });
 });
 

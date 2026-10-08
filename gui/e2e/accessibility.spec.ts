@@ -66,9 +66,9 @@ async function mockChatStrip(page: Page) {
 
 /**
  * Opens the chat on the demo workspace, then the strip's panel, and checks the whole page with axe in both
- * states: the docked chat with its tabs and the strip above the terminal, then the strip's panel open.
+ * states: the docked chat with the strip above the terminal, then the strip's panel open.
  */
-/** The chat in the centre with a part open beside it: the header row, the chat's tabs and strip, the divider and the panel. */
+/** The chat in the centre with a part open beside it: the header row, the chat's strip, the divider and the panel. */
 async function checkChatBeside(page: Page, label: string) {
   // Beside, over the specs' default of hidden, once per tab.
   await page.addInitScript(() => {
@@ -96,7 +96,7 @@ async function checkChatStrip(page: Page, label: string) {
   await page.route('**/api/attention?*', (route) => route.fulfill({ json: { requests: [
     { workspaceId: 'demo', id: 'q1', timestamp: '2026-10-02T11:00:00.000Z', harness: 'claude', message: 'Which cache backend should we use?', options: ['Redis', 'In memory'] },
   ] } }));
-  // A CLI at work, so the sidebar's Running now group and its marker are checked too.
+  // A CLI at work, so the open session's live marker is checked too.
   await page.route('**/api/terminals/running', (route) => route.fulfill({ json: { sessions: [{
     id: 't1', workspace: 'demo', target: 'claude', label: 'Claude Code', cwd: '/dev/demo', state: 'running', attached: true,
     startedAt: new Date(Date.now() - 60_000).toISOString(), lastOutputAt: new Date().toISOString(),
@@ -107,21 +107,20 @@ async function checkChatStrip(page: Page, label: string) {
   await expect(strip).toContainText('Needs you');
   await expect(strip.getByRole('button', { name: /^Next: / })).toBeVisible();
   await expect(strip.getByRole('group', { name: 'The AI is waiting for your answer' })).toBeVisible();
-  await expect(page.locator('aside.context-sidebar').getByText('Running now', { exact: true })).toBeVisible();
-  await expect(page.locator('aside.context-sidebar').getByText('Which cache backend should we use?')).toBeVisible();
+  const openSession = page.locator('aside.context-sidebar [data-sidebar-session="demo"]');
+  await expect(openSession.locator('.live-dot')).toHaveAttribute('data-state', 'waiting');
+  await expect(openSession.getByText('Which cache backend should we use?')).toBeVisible();
   await expectNoSeriousViolations(page, `${label} strip`);
   await strip.getByRole('button', { expanded: false }).click();
   const detail = strip.getByRole('region', { name: 'Progress details' });
   await expect(detail.getByText('The AI suggests reopening this')).toBeVisible();
   await expect(detail.getByText('Waiting for an API key').first()).toBeVisible();
   await expectNoSeriousViolations(page, `${label} strip panel`);
-  // The list of open chats: rings, state chips, goal lines and the row actions.
+  // The open session in the sidebar, with its row actions showing.
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'All chats', exact: true }).click();
-  const list = page.getByRole('dialog');
-  await expect(list.locator('li[data-branch="demo"] .state-chip')).toHaveText('Waiting for you');
-  await list.locator('li[data-branch="demo"]').hover();
-  await expectNoSeriousViolations(page, `${label} list of chats`);
+  await openSession.hover();
+  await expect(page.locator('aside.context-sidebar').getByRole('button', { name: /^Close session/ })).toHaveCSS('opacity', '1');
+  await expectNoSeriousViolations(page, `${label} open session`);
 }
 
 /** A workspace chat with no CLI yet: the tool buttons and the saved conversations under them. */

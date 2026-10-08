@@ -86,10 +86,10 @@ test('one real shell survives window changes and reload, then stops explicitly',
   })).toBeLessThanOrEqual(1);
   // Another workspace's chat, then back: the shell and its open panel are as they were.
   await toggleInspector('Code');
-  await chat.getByRole('button', { name: 'Add workspace' }).click();
-  await page.getByRole('menuitem').filter({ hasText: 'terminal-other' }).click();
+  const sidebar = page.locator('aside.context-sidebar');
+  await sidebar.getByRole('button', { name: 'Resume CLI chat for terminal-other' }).click();
   await expect(page.getByTestId('terminal-pane').filter({ visible: true }).first().getByRole('region', { name: 'Start a CLI session' })).toBeVisible();
-  await chat.getByRole('tab', { name: /^Show terminal-test/ }).click();
+  await sidebar.locator('[data-sidebar-session="terminal-test"]').click();
   await expect(page).toHaveURL(/\/workspaces\/terminal-test\/changes$/);
   await expect(code).toBeVisible();
   await expect(pane).toBeVisible();

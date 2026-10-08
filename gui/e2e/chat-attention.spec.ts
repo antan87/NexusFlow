@@ -66,54 +66,50 @@ test.beforeEach(async ({ page }) => {
 
 const chatOf = (page: Page) => page.getByRole('region', { name: 'CLI Chat' });
 const alertsOf = (page: Page) => page.getByRole('status', { name: 'Chats waiting for you' });
-const chipOf = (page: Page) => chatOf(page).getByRole('button', { name: /chats? waiting for you\. Show/ });
+/** An open chat is a session in the sidebar. While its AI waits, the row says so and shows the question. */
+const session = (page: Page, branch: string) => page.locator(`aside.context-sidebar [data-sidebar-session="${branch}"]`);
+const WAITING = 'Waiting for you';
 
 test.describe('chat on screen', () => {
-  test('flags the waiting chat, and the header chip jumps to it', async ({ page }) => {
+  test('flags the waiting chat in the sidebar, and choosing it goes there', async ({ page }) => {
     await page.goto(CHAT_PAGE);
-    const chat = chatOf(page);
-    await expect(chat.getByRole('tab', { name: 'Show beta in the left pane' })).toBeVisible();
-    await expect(chipOf(page)).toHaveCount(0);
+    await expect(session(page, 'beta')).toBeVisible();
+    await expect(session(page, 'beta')).not.toContainText(WAITING);
 
     requests.push(ask('beta', 'Which database should the migration target?'));
 
-    await expect(chipOf(page)).toHaveAccessibleName('1 chat waiting for you. Show beta.', { timeout: 12_000 });
-    await expect(chipOf(page)).toContainText('1 waiting');
-    await expect(chipOf(page)).toHaveAttribute('title', /beta: Which database should the migration target\?/);
-    // The tab that needs the user is marked; the other is not.
-    await expect(chat.getByRole('tab', { name: 'Show beta in the left pane, waiting for your input' })).toBeVisible();
-    await expect(chat.getByRole('tab', { name: 'Show alpha in the left pane' })).toBeVisible();
+    // The session that needs the user says so and shows the question; the other does not.
+    await expect(session(page, 'beta')).toContainText(`${WAITING}: Which database should the migration target?`, { timeout: 12_000 });
+    await expect(session(page, 'alpha')).not.toContainText(WAITING);
     await expect(page).toHaveTitle(/^\(1\) /);
-    // Floating cards would sit on the chat's own header, so none are shown while it is open.
+    // Floating cards would sit on the chat itself, so none are shown while it is open.
     await expect(alertsOf(page)).toHaveCount(0);
 
-    await chipOf(page).click();
+    await session(page, 'beta').click();
 
-    await expect(chat.getByRole('tab', { name: /^Show beta in the left pane/ })).toHaveAttribute('aria-selected', 'true');
-    // Seen: the alerts stop. Not answered yet: the tab still says so.
-    await expect(chipOf(page)).toHaveCount(0);
+    await expect(session(page, 'beta')).toHaveAttribute('aria-current', 'page');
+    // Seen: the alerts stop. Not answered yet: the session still says so.
     await expect(page).not.toHaveTitle(/^\(\d+\) /);
-    await expect(chat.getByRole('tab', { name: 'Show beta in the left pane, waiting for your input' })).toBeVisible();
+    await expect(session(page, 'beta')).toContainText(WAITING);
 
     // Answered (the server no longer lists it): the mark goes.
     requests = [];
-    await expect(chat.getByRole('tab', { name: 'Show beta in the left pane' })).toBeVisible({ timeout: 12_000 });
+    await expect(session(page, 'beta')).not.toContainText(WAITING, { timeout: 12_000 });
   });
 
   test('does not alert for the chat the user is already looking at', async ({ page }) => {
     await page.goto(CHAT_PAGE);
     await page.bringToFront();
-    const chat = chatOf(page);
-    await expect(chat.getByRole('tab', { name: 'Show alpha in the left pane' })).toHaveAttribute('aria-selected', 'true');
+    await expect(session(page, 'alpha')).toHaveAttribute('aria-current', 'page');
     expect(await page.evaluate(() => document.hasFocus())).toBe(true);
 
     requests.push(ask('alpha', 'Proceed with the rewrite?'));
     await nextPoll();
     await nextPoll();
 
-    // No alert for what the user is looking at, but the tab says the question is open until it is answered.
-    await expect(chipOf(page)).toHaveCount(0);
-    await expect(chat.getByRole('tab', { name: 'Show alpha in the left pane, waiting for your input' })).toBeVisible();
+    // No alert for what the user is looking at, but the session says the question is open until it is answered.
+    await expect(session(page, 'alpha')).toContainText(`${WAITING}: Proceed with the rewrite?`);
+    await expect(alertsOf(page)).toHaveCount(0);
     await expect(page).not.toHaveTitle(/^\(\d+\) /);
   });
 
@@ -123,47 +119,49 @@ test.describe('chat on screen', () => {
       document.hasFocus = () => (window as any).__focused === true;
     });
     await page.goto(CHAT_PAGE);
-    await expect(chatOf(page).getByRole('tab', { name: 'Show alpha in the left pane' })).toHaveAttribute('aria-selected', 'true');
+    await expect(session(page, 'alpha')).toHaveAttribute('aria-current', 'page');
 
     requests.push(ask('alpha', 'Approve the schema change?'));
 
-    await expect(chipOf(page)).toBeVisible({ timeout: 12_000 });
+    // Nobody is looking, so the question is not seen: the window title counts it.
+    await expect(page).toHaveTitle(/^\(1\) /, { timeout: 12_000 });
     await nextPoll();
-    await expect(chipOf(page)).toBeVisible();
+    await expect(page).toHaveTitle(/^\(1\) /);
 
     await page.evaluate(() => {
       (window as any).__focused = true;
       window.dispatchEvent(new Event('focus'));
     });
 
-    await expect(chipOf(page)).toHaveCount(0);
+    await expect(page).not.toHaveTitle(/^\(\d+\) /);
   });
 
-  test('keeps showing the waiting chat while opening another tab waits on the server', async ({ page }) => {
+  test('keeps showing the waiting chat while opening another chat waits on the server', async ({ page }) => {
     await page.goto(CHAT_PAGE);
     requests.push(ask('beta', 'Which database should the migration target?'));
-    await expect(chipOf(page)).toBeVisible({ timeout: 12_000 });
+    await expect(session(page, 'beta')).toContainText(WAITING, { timeout: 12_000 });
 
-    // Opening a tab changes which chats are asked about; make the answer slow so a gap would show.
+    // Opening a chat changes which chats are asked about; make the answer slow so a gap would show.
     answerDelayMs = 3000;
     const slowRequest = page.waitForRequest(request => /workspaces=[^&]*gamma/.test(decodeURIComponent(request.url())));
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /gamma/ }).click();
+    await page.goto('/#/workspaces/gamma/chat');
     await slowRequest;
     await page.waitForTimeout(500);
 
     // Counted at once, not with a retrying assertion: that would wait out the slow answer and pass anyway.
-    expect(await chipOf(page).count()).toBe(1);
-    expect(await chatOf(page).getByRole('tab', { name: 'Show beta in the left pane, waiting for your input' }).count()).toBe(1);
+    expect(await session(page, 'beta').filter({ hasText: WAITING }).count()).toBe(1);
+    expect(await page.title()).toMatch(/^\(1\) /);
   });
 
-  test('counts every waiting chat in the chip', async ({ page }) => {
+  test('counts every waiting chat in the window title and marks each one', async ({ page }) => {
     await chatState(page, { tabs: ['alpha', 'beta', 'gamma', 'delta'] });
     await page.goto(CHAT_PAGE);
     requests.push(ask('beta', 'Question from beta'), ask('delta', 'Question from delta'));
 
-    await expect(chipOf(page)).toHaveAccessibleName(/^2 chats waiting for you\. Show /, { timeout: 12_000 });
-    await expect(chipOf(page)).toContainText('2 waiting');
+    await expect(page).toHaveTitle(/^\(2\) /, { timeout: 12_000 });
+    await expect(session(page, 'beta')).toContainText('Question from beta');
+    await expect(session(page, 'delta')).toContainText('Question from delta');
+    await expect(session(page, 'gamma')).not.toContainText(WAITING);
   });
 });
 
@@ -185,7 +183,7 @@ test.describe('chat off screen', () => {
 
     const chat = chatOf(page);
     await expect(chat).toBeVisible();
-    await expect(chat.getByRole('tab', { name: /^Show beta in the left pane/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(session(page, 'beta')).toHaveAttribute('aria-current', 'page');
     await expect(alerts).toHaveCount(0);
     await expect(page).not.toHaveTitle(/^\(\d+\) /);
   });

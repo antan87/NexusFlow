@@ -40,33 +40,39 @@ test.beforeEach(async ({ page }) => {
 
 const chatOf = (page: Page) => page.getByRole('region', { name: 'CLI Chat', exact: true });
 const workspaceNav = (page: Page) => page.getByRole('navigation', { name: 'Workspace' });
-const tab = (page: Page, name: string) => chatOf(page).getByRole('tab', { name: new RegExp(`^Show ${name} in the left pane`) });
-/**
- * Closes a chat's tab the accessible way: the Delete key on the focused tab. A terminal takes focus once it has
- * attached, and a key pressed then belongs to the terminal, so wait for the one in front to settle first.
- */
+const sidebar = (page: Page) => page.locator('aside.context-sidebar');
+/** An open chat is a session in the sidebar, in the order it was opened, with the one on screen marked as the current page. */
+const session = (page: Page, name: string) => sidebar(page).locator(`[data-sidebar-session="${name}"]`);
+const sessions = (page: Page) => sidebar(page).locator('[data-sidebar-session]');
+/** Opens a chat the way a link to it does: by its address. */
+const openChat = async (page: Page, name: string) => {
+  await page.goto(`/#/workspaces/${name}/chat`);
+  await expect(session(page, name)).toBeVisible();
+};
+/** Opens a chat from the sidebar's Resume button, which asks the dock to show it, so the dock moves the address itself. */
+const addChat = (page: Page, name: string) => sidebar(page).getByRole('button', { name: `Resume CLI chat for ${name}` }).click();
 /** The state of the terminal on screen. While it runs the word is for screen readers only, so the pane is what is visible. */
 const shownState = (page: Page) => chatOf(page).getByTestId('terminal-pane').filter({ visible: true }).getByTestId('terminal-state');
+/** A terminal takes focus once it has attached, and a key pressed then belongs to the terminal, so wait for the one in front to settle first. */
 const settled = (page: Page) => expect(shownState(page)).toHaveText('Running', { timeout: 20_000 });
-const closeTab = async (page: Page, name: string) => {
+/** Closes a session the accessible way: the Delete key on its focused link. */
+const closeSession = async (page: Page, name: string) => {
   await settled(page);
-  await tab(page, name).focus();
+  await session(page, name).focus();
   await page.keyboard.press('Delete');
 };
-/**
- * Closes a chat's tab with its cross. Its status icons arrive a moment after the terminal does and move the cross,
- * so wait for the tab to settle before aiming at it.
- */
+/** Closes a session with its cross. */
 const clickCross = async (page: Page, name: string) => {
   await settled(page);
-  await tab(page, name).locator('[data-close-tab]').click();
+  await sidebar(page).getByRole('button', { name: `Close session ${name}` }).click();
 };
+const current = (page: Page, name: string) => expect(session(page, name)).toHaveAttribute('aria-current', 'page');
 
 test.describe('the chat is the centre of a workspace', () => {
   test('a workspace opens on its chat, with nothing open beside it', async ({ page }) => {
     await page.goto('/#/workspaces/alpha');
     await expect(chatOf(page)).toBeVisible();
-    await expect(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'true');
+    await current(page, 'alpha');
     // The rail offers what can open beside the chat; the chat is the page, so it has no item and none is current.
     await expect(workspaceNav(page).getByRole('link')).toHaveCount(5);
     await expect(workspaceNav(page).locator('[aria-current="page"]')).toHaveCount(0);
@@ -75,12 +81,12 @@ test.describe('the chat is the centre of a workspace', () => {
   });
 
   test('a link to a workspace chat opens that chat, even when another was open before', async ({ page }) => {
-    await page.goto('/#/workspaces/alpha/chat');
-    await expect(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'true');
-    await page.goto('/#/workspaces/gamma/chat');
-    await expect(tab(page, 'gamma')).toHaveAttribute('aria-selected', 'true');
-    // Both chats are open as tabs, and the one in the address is in front.
-    await expect(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(2);
+    await openChat(page, 'alpha');
+    await current(page, 'alpha');
+    await openChat(page, 'gamma');
+    await current(page, 'gamma');
+    // Both chats are open as sessions, and the one in the address is the current one.
+    await expect(sessions(page)).toHaveCount(2);
   });
 
   test('the chat is hidden, not closed, on every other destination', async ({ page }) => {
@@ -115,10 +121,9 @@ test.describe('the chat is the centre of a workspace', () => {
     // Both chats are mounted, one in front, so look only at the terminal that is showing.
     const showing = shownState(page);
     await expect(showing).toHaveText('Running');
-    await tab(page, 'alpha').waitFor();
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /beta/ }).click();
-    await expect(tab(page, 'beta')).toHaveAttribute('aria-selected', 'true');
+    await session(page, 'alpha').waitFor();
+    await addChat(page, 'beta');
+    await current(page, 'beta');
     await expect(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
     await expect(showing).toHaveText('Running');
 
@@ -131,93 +136,85 @@ test.describe('the chat is the centre of a workspace', () => {
 });
 
 test.describe('the address says which chat is showing', () => {
-  test('choosing a tab goes to that chat, and back returns to the one before', async ({ page }) => {
-    await page.goto('/#/workspaces/alpha/chat');
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /beta/ }).click();
+  test('choosing a session goes to that chat, and back returns to the one before', async ({ page }) => {
+    await openChat(page, 'alpha');
+    await addChat(page, 'beta');
     await expect(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
 
-    await tab(page, 'alpha').click();
+    await session(page, 'alpha').click();
     await expect(page).toHaveURL(/#\/workspaces\/alpha\/chat$/);
-    await expect(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'true');
+    await current(page, 'alpha');
 
     await page.goBack();
     await expect(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
-    await expect(tab(page, 'beta')).toHaveAttribute('aria-selected', 'true');
+    await current(page, 'beta');
   });
 
-  test('closing the tab in front brings up the next chat and its address', async ({ page }) => {
-    await page.goto('/#/workspaces/alpha/chat');
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /beta/ }).click();
+  test('closing the session in front brings up the one before it and its address', async ({ page }) => {
+    await openChat(page, 'alpha');
+    await addChat(page, 'beta');
     await expect(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
 
-    await closeTab(page, 'beta');
+    await closeSession(page, 'beta');
     await expect(page).toHaveURL(/#\/workspaces\/alpha\/chat$/);
-    await expect(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'true');
-    await expect(tab(page, 'beta')).toHaveCount(0);
+    await current(page, 'alpha');
+    await expect(session(page, 'beta')).toHaveCount(0);
   });
 
-  test('the cross closes a tab with the mouse, and the Delete key does the same from the keyboard', async ({ page }) => {
-    await page.goto('/#/workspaces/alpha/chat');
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /beta/ }).click();
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /gamma/ }).click();
+  test('the cross closes a session with the mouse, and the Delete key does the same from the keyboard', async ({ page }) => {
+    await openChat(page, 'alpha');
+    await addChat(page, 'beta');
+    await addChat(page, 'gamma');
     await expect(page).toHaveURL(/#\/workspaces\/gamma\/chat$/);
 
     await clickCross(page, 'gamma');
-    // The chat used just before it comes to the front.
+    // The session before it comes to the front.
     await expect(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
-    await expect(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(2);
+    await expect(sessions(page)).toHaveCount(2);
 
-    await closeTab(page, 'alpha');
-    await expect(tab(page, 'alpha')).toHaveCount(0);
-    await expect(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(1);
+    await closeSession(page, 'alpha');
+    await expect(session(page, 'alpha')).toHaveCount(0);
+    await expect(sessions(page)).toHaveCount(1);
   });
 
-  test('closing a tab from the keyboard does not drop focus to the page', async ({ page }) => {
-    await page.goto('/#/workspaces/alpha/chat');
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /beta/ }).click();
+  test('closing a session from the keyboard does not drop focus to the page', async ({ page }) => {
+    await openChat(page, 'alpha');
+    await addChat(page, 'beta');
     await expect(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
-    await closeTab(page, 'beta');
+    await closeSession(page, 'beta');
     await expect(page).toHaveURL(/#\/workspaces\/alpha\/chat$/);
-    // Focus moves to the chat that took its place (its tab, or its terminal), never back to <body>.
-    await expect.poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('[aria-label="CLI Chat"]')))).toBe(true);
+    // Focus moves to the session that took its place in the list, or on into its terminal, never back to <body>.
+    await expect.poll(() => page.evaluate(() => Boolean(document.activeElement?.closest('[aria-label="CLI Chat"], aside.context-sidebar')))).toBe(true);
   });
 
-  test('exposes the tabs as a tab list with nothing else inside it', async ({ page }) => {
-    await page.goto('/#/workspaces/alpha/chat');
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /beta/ }).click();
-    const list = chatOf(page).getByRole('tablist', { name: 'Open chats' });
-    await expect(list.getByRole('tab')).toHaveCount(2);
-    // The cross is not a control of its own: a screen reader meets the tab and the Delete shortcut.
-    await expect(list.getByRole('button')).toHaveCount(0);
-    await expect(tab(page, 'alpha')).toHaveAttribute('aria-keyshortcuts', 'Delete');
+  test('lists the open chats as a group of links that say Delete closes them', async ({ page }) => {
+    await openChat(page, 'alpha');
+    await addChat(page, 'beta');
+    const list = sidebar(page).getByRole('group', { name: 'Open sessions list' });
+    await expect(list.locator('a[data-sidebar-session]')).toHaveCount(2);
+    await expect(session(page, 'alpha')).toHaveAttribute('aria-keyshortcuts', 'Delete');
+    // The cross is a button of its own, for the mouse and for touch.
+    await expect(list.getByRole('button', { name: /^Close session/ })).toHaveCount(2);
   });
 
-  test('closing a tab that is not in front leaves the screen as it is', async ({ page }) => {
-    await page.goto('/#/workspaces/alpha/chat');
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /beta/ }).click();
+  test('closing a session that is not in front leaves the screen as it is', async ({ page }) => {
+    await openChat(page, 'alpha');
+    await addChat(page, 'beta');
     await expect(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
 
-    await closeTab(page, 'alpha');
+    await closeSession(page, 'alpha');
     await expect(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
-    await expect(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(1);
+    await expect(sessions(page)).toHaveCount(1);
   });
 
   test('a reload stays on the same chat and does not navigate by itself', async ({ page }) => {
-    await page.goto('/#/workspaces/alpha/chat');
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /beta/ }).click();
+    await openChat(page, 'alpha');
+    await addChat(page, 'beta');
     await expect(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
     await page.reload();
     await expect(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
-    await expect(tab(page, 'beta')).toHaveAttribute('aria-selected', 'true');
-    await expect(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(2);
+    await current(page, 'beta');
+    await expect(sessions(page)).toHaveCount(2);
   });
 
   test('asking to see a chat from elsewhere in the app goes to it', async ({ page }) => {
@@ -225,7 +222,7 @@ test.describe('the address says which chat is showing', () => {
     await page.goto('/#/workspaces/beta/sessions');
     await page.getByRole('button', { name: 'Open CLI Chat', exact: true }).click();
     await expect(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
-    await expect(tab(page, 'beta')).toHaveAttribute('aria-selected', 'true');
+    await current(page, 'beta');
   });
 
   test('an archived workspace has no chat: its address shows its record', async ({ page }) => {
@@ -259,28 +256,25 @@ test.describe('on a slow machine', () => {
 
   test('closing a tab straight after opening it does not bring it back', async ({ page }) => {
     await page.goto('/#/workspaces/alpha/chat');
-    await slow(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'true');
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /beta/ }).click();
+    await slow(session(page, 'alpha')).toHaveAttribute('aria-current', 'page');
+    await addChat(page, 'beta');
     await slow(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
-    await closeTab(page, 'beta');
+    await closeSession(page, 'beta');
 
     // Settle: wherever the app ends up, it is the chat that is still open, and it agrees with the address.
     await slow(page).toHaveURL(/#\/workspaces\/alpha\/chat$/, { timeout: 15_000 });
-    await slow(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'true');
-    await slow(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(1);
+    await slow(session(page, 'alpha')).toHaveAttribute('aria-current', 'page');
+    await slow(sessions(page)).toHaveCount(1);
     await page.waitForTimeout(1500);
     await slow(page).toHaveURL(/#\/workspaces\/alpha\/chat$/);
-    await slow(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(1);
+    await slow(sessions(page)).toHaveCount(1);
   });
 
-  test('opening two chats quickly and closing the one in front lands on the one used before it, and stays there', async ({ page }) => {
+  test('opening two chats quickly and closing the one in front lands on the one before it, and stays there', async ({ page }) => {
     await page.goto('/#/workspaces/alpha/chat');
-    await slow(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'true');
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /beta/ }).click();
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /gamma/ }).click();
+    await slow(session(page, 'alpha')).toHaveAttribute('aria-current', 'page');
+    await addChat(page, 'beta');
+    await addChat(page, 'gamma');
     await slow(page).toHaveURL(/#\/workspaces\/gamma\/chat$/);
     await clickCross(page, 'gamma');
 
@@ -288,26 +282,26 @@ test.describe('on a slow machine', () => {
     // A late landing from the quick opens must neither bring gamma back nor move the screen away.
     await page.waitForTimeout(2000);
     await slow(page).toHaveURL(/#\/workspaces\/beta\/chat$/);
-    await slow(tab(page, 'beta')).toHaveAttribute('aria-selected', 'true');
-    await slow(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(2);
-    await slow(tab(page, 'gamma')).toHaveCount(0);
-    await slow(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'false');
+    await slow(session(page, 'beta')).toHaveAttribute('aria-current', 'page');
+    await slow(sessions(page)).toHaveCount(2);
+    await slow(session(page, 'gamma')).toHaveCount(0);
+    await slow(session(page, 'alpha')).not.toHaveAttribute('aria-current', 'page');
   });
 
-  test('choosing a tab and then closing it does not bring it back', async ({ page }) => {
+  test('choosing a session and then closing the other does not bring it back', async ({ page }) => {
     await page.goto('/#/workspaces/alpha/chat');
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
-    await page.getByRole('menuitem', { name: /beta/ }).click();
+    await slow(session(page, 'alpha')).toBeVisible();
+    await addChat(page, 'beta');
     await slow(page).toHaveURL(/#\/workspaces\/beta\/chat$/, { timeout: 15_000 });
-    await slow(tab(page, 'beta')).toHaveAttribute('aria-selected', 'true');
-    await tab(page, 'alpha').click();
-    await closeTab(page, 'beta');
+    await slow(session(page, 'beta')).toHaveAttribute('aria-current', 'page');
+    await session(page, 'alpha').click();
+    await closeSession(page, 'beta');
 
     await slow(page).toHaveURL(/#\/workspaces\/alpha\/chat$/, { timeout: 15_000 });
     await page.waitForTimeout(1500);
     await slow(page).toHaveURL(/#\/workspaces\/alpha\/chat$/);
-    await slow(chatOf(page).getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(1);
-    await slow(tab(page, 'alpha')).toHaveAttribute('aria-selected', 'true');
+    await slow(sessions(page)).toHaveCount(1);
+    await slow(session(page, 'alpha')).toHaveAttribute('aria-current', 'page');
   });
 });
 
@@ -362,9 +356,10 @@ test.describe('the dock sits exactly over its slot', () => {
 });
 
 test.describe('a menu opened over the chat stays above it', () => {
-  test('the Add workspace menu is not hidden behind the dock', async ({ page }) => {
+  test('the menu for docking a second workspace is not hidden behind the dock', async ({ page }) => {
     await page.goto('/#/workspaces/alpha/chat');
-    await chatOf(page).getByRole('button', { name: 'Add workspace' }).click();
+    await expect(chatOf(page)).toBeVisible();
+    await page.getByRole('button', { name: 'Dock a second workspace' }).click();
     const item = page.getByRole('menuitem', { name: /beta/ });
     await expect(item).toBeVisible();
     // Visible and clickable: nothing sits on top of it.

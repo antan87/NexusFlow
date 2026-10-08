@@ -61,6 +61,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 const sidebar = (page: Page) => page.locator('aside.context-sidebar');
+/** An open chat is a session in the sidebar, above the list of workspaces, in the order it was opened. */
+const session = (page: Page, branch: string) => sidebar(page).locator(`[data-sidebar-session="${branch}"]`);
+/** The list of workspaces on its own: open chats are listed above it, so a test of its order opens none. */
+const noOpenChats = (page: Page) => page.addInitScript((key) => localStorage.setItem(key, JSON.stringify({ openTabs: [], activeTab: null, modes: {} })), CHAT_KEY);
 const rowLink = (page: Page, name: string) => sidebar(page).getByRole('link', { name: new RegExp(`^${name}`) });
 /** The row around a workspace link, where its marker sits. */
 const rowOf = (page: Page, name: string) => rowLink(page, name).locator('xpath=..');
@@ -68,6 +72,7 @@ const order = async (page: Page) => (await sidebar(page).locator('a[href^="#/wor
 
 test.describe('the sidebar says where each CLI runs', () => {
   test('puts those workspaces first, under Running now, and says what each is doing', async ({ page }) => {
+    await noOpenChats(page);
     await mockRunning(page);
     await page.goto('/#/guide');
     await expect(sidebar(page).getByText('Running now', { exact: true })).toBeVisible();
@@ -85,6 +90,7 @@ test.describe('the sidebar says where each CLI runs', () => {
   });
 
   test('keeps the list as it was when nothing runs', async ({ page }) => {
+    await noOpenChats(page);
     await mockRunning(page, { running: [] });
     await page.goto('/#/guide');
     await expect.poll(() => order(page)).toEqual(['epsilon', 'delta', 'gamma', 'beta', 'alpha']);
@@ -93,6 +99,7 @@ test.describe('the sidebar says where each CLI runs', () => {
   });
 
   test('keeps working, with no markers, when the running CLIs cannot be read', async ({ page }) => {
+    await noOpenChats(page);
     await mockRunning(page, { fail: true });
     await page.goto('/#/guide');
     await expect.poll(() => order(page)).toEqual(['epsilon', 'delta', 'gamma', 'beta', 'alpha']);
@@ -100,14 +107,16 @@ test.describe('the sidebar says where each CLI runs', () => {
     await expect(sidebar(page).getByText('Running now', { exact: true })).toHaveCount(0);
   });
 
-  test('shows the same dot on the chat tabs and in the list of chats', async ({ page }) => {
+  test('marks an open chat on its own row, and does not list it again below', async ({ page }) => {
     await mockRunning(page);
     await page.goto('/#/workspaces/alpha/chat');
-    const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
-    await expect(chat.getByRole('tab', { name: /^Show Faster search/ }).locator('.live-dot')).toHaveAttribute('data-state', 'working');
-    await expect(chat.getByRole('tab', { name: /^Show Importer/ }).locator('.live-dot')).toHaveAttribute('data-state', 'idle');
-    await chat.getByRole('button', { name: 'All chats', exact: true }).click();
-    await expect(page.getByRole('dialog').locator('li[data-branch="beta"] [data-live]')).toHaveAttribute('data-live', 'idle');
+    await expect(session(page, 'alpha').locator('.live-dot')).toHaveAttribute('data-state', 'working');
+    await expect(session(page, 'beta').locator('.live-dot')).toHaveAttribute('data-state', 'idle');
+    // The open chats keep the order they were opened in; the list below holds the rest, running ones first.
+    await expect.poll(() => sidebar(page).locator('[data-sidebar-session]').evaluateAll((links) => links.map((link) => link.getAttribute('data-sidebar-session')))).toEqual(['alpha', 'beta']);
+    await expect(sidebar(page).locator('a[href="#/workspaces/alpha"], a[href="#/workspaces/beta"]')).toHaveCount(0);
+    await expect(sidebar(page).locator('a[href="#/workspaces/gamma"]')).toHaveCount(1);
+    await expect(sidebar(page).getByText('Running now', { exact: true })).toBeVisible();
   });
 });
 
@@ -133,7 +142,7 @@ test.describe('when an AI waits for an answer', () => {
     await expect(rowLink(page, 'Release notes')).toContainText('Publish the notes now?');
     await expect(rowLink(page, 'Release notes')).toContainText('Waiting for you');
     await rowLink(page, 'Release notes').click();
-    await expect(page.getByRole('region', { name: 'CLI Chat', exact: true }).getByRole('tab', { name: /^Show Release notes/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(session(page, 'gamma')).toHaveAttribute('aria-current', 'page');
   });
 
   test('a question from a workspace with no open chat and nothing running is not shown', async ({ page }) => {
