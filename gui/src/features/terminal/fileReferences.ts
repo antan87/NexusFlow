@@ -1,18 +1,19 @@
+import { fileUrlToPath, splitLocation, trimTrailingPunctuation } from '../../lib/fileReference.js';
 import { isWebOrDomain } from './webLinks.js';
 
 export interface FileReference { text: string; path: string; line?: number; start: number; end: number }
 
 const MARKDOWN_LINK = /\[([^\]]*)\]\((<[^>]+>|[^)]+)\)/g;
 
-function trimTrailingPunctuation(str: string): string {
-  let text = str;
-  while (
-    (/[,'"`\]};.!?)}>]$/.test(text) || (text.endsWith(':') && !/^[a-zA-Z]:$/.test(text)))
-    && !/\(\d+(?:,\d+)?\)$/.test(text)
-  ) {
-    text = text.slice(0, -1);
-  }
-  return text;
+/** The path and line a printed token names, or null when it does not look like a file path. */
+function toPathAndLine(text: string): { path: string; line?: number } | null {
+  const location = splitLocation(text);
+  let path = location.path.replace(/['"`>]$/, '');
+  path = fileUrlToPath(path).replace(/#.*$/, '');
+  if (!path || isWebOrDomain(path)) return null;
+  if (!/[/\\]/.test(path) && !/^[^.:]+(?:\.[a-z\d_-]+)*\.[a-z][a-z\d]{0,11}$/i.test(path)) return null;
+  if (/^(?:\.\.?[/\\])?$/.test(path)) return null;
+  return { path, line: location.line };
 }
 
 /** Find file paths in terminal output, retaining spaces inside quoted paths and stripping markdown/angle wrapper syntax. */
@@ -35,27 +36,12 @@ export function findFileReferences(row: string): FileReference[] {
     if (isWebOrDomain(raw)) continue;
 
     const text = trimTrailingPunctuation(raw);
-    const location = text.match(/:(\d+)(?::\d+)?$/)
-      ?? text.match(/\((\d+)(?:,\d+)?\)$/)
-      ?? text.match(/#L(\d+)(?:-L?\d+)?$/i);
-    const lineNumber = Number(location?.[1]);
-    const line = Number.isSafeInteger(lineNumber) && lineNumber > 0 ? lineNumber : undefined;
-    let path = (location ? text.slice(0, -location[0].length) : text).replace(/['"`>]$/, '');
-    if (/^file:\/\//i.test(path)) {
-      try {
-        path = decodeURIComponent(new URL(path).pathname).replace(/^\/([a-z]:\/)/i, '$1');
-      } catch {
-        path = path.replace(/^file:\/\//i, '');
-      }
-    }
-    path = path.replace(/#.*$/, '');
-    if (!path || isWebOrDomain(path)) continue;
-    if (!/[/\\]/.test(path) && !/^[^.:]+(?:\.[a-z\d_-]+)*\.[a-z][a-z\d]{0,11}$/i.test(path)) continue;
-    if (/^(?:\.\.?[/\\])?$/.test(path)) continue;
+    const reference = toPathAndLine(text);
+    if (!reference) continue;
 
     const targetOffset = match[0].indexOf(match[2]) + (unwrapped ? 1 : 0);
     const start = matchStart + targetOffset;
-    result.push({ text, path, line, start, end: start + text.length });
+    result.push({ text, ...reference, start, end: start + text.length });
   }
 
   for (let index = 0; index < row.length;) {
@@ -75,25 +61,10 @@ export function findFileReferences(row: string): FileReference[] {
     const token = row.slice(tokenStart, index);
     const leading = token.match(/^[('"`[{<]*/)?.[0].length ?? 0;
     const text = trimTrailingPunctuation(token.slice(leading));
-    const location = text.match(/:(\d+)(?::\d+)?$/)
-      ?? text.match(/\((\d+)(?:,\d+)?\)$/)
-      ?? text.match(/#L(\d+)(?:-L?\d+)?$/i);
-    const lineNumber = Number(location?.[1]);
-    const line = Number.isSafeInteger(lineNumber) && lineNumber > 0 ? lineNumber : undefined;
-    let path = (location ? text.slice(0, -location[0].length) : text).replace(/['"`>]$/, '');
-    if (/^file:\/\//i.test(path)) {
-      try {
-        path = decodeURIComponent(new URL(path).pathname).replace(/^\/([a-z]:\/)/i, '$1');
-      } catch {
-        path = path.replace(/^file:\/\//i, '');
-      }
-    }
-    path = path.replace(/#.*$/, '');
-    if (!path || isWebOrDomain(path)) continue;
-    if (!/[/\\]/.test(path) && !/^[^.:]+(?:\.[a-z\d_-]+)*\.[a-z][a-z\d]{0,11}$/i.test(path)) continue;
-    if (/^(?:\.\.?[/\\])?$/.test(path)) continue;
+    const reference = toPathAndLine(text);
+    if (!reference) continue;
     const start = tokenStart + leading;
-    result.push({ text, path, line, start, end: start + text.length });
+    result.push({ text, ...reference, start, end: start + text.length });
   }
 
   return result.sort((a, b) => a.start - b.start);
