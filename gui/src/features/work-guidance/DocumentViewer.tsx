@@ -32,6 +32,12 @@ export interface DocumentViewerProps {
   rawLabels?: [string, string];
   onClose?: () => void;
   compact?: boolean;
+  /**
+   * Fills its container: one slim header row and a body that scrolls on its own, for a reader that
+   * takes the panel's whole height. `leading` goes at the start of that row (navigation, Back).
+   */
+  fill?: boolean;
+  leading?: ReactNode;
   notice?: ReactNode;
   className?: string;
 }
@@ -56,7 +62,7 @@ function TrustControl({ trusted, onToggle, compact }: { trusted: boolean; onTogg
  * browser Fullscreen API — so Download, the raw toggle and the trust control all stay reachable, and
  * docked side panels like the chat cannot overlap it.
  */
-export function DocumentViewer({ title, preview, status, fileUrl = '', downloadHref, browserHref, links, raw, onToggleRaw, rawLabels = ['Raw text', 'Rendered view'], onClose, compact = false, notice, className }: DocumentViewerProps) {
+export function DocumentViewer({ title, preview, status, fileUrl = '', downloadHref, browserHref, links, raw, onToggleRaw, rawLabels = ['Raw text', 'Rendered view'], onClose, compact = false, fill = false, leading, notice, className }: DocumentViewerProps) {
   const [expanded, setExpanded] = useState(false);
   const [trusted, setTrusted] = useState(false);
   const inlineToggle = useRef<HTMLButtonElement>(null);
@@ -150,7 +156,44 @@ export function DocumentViewer({ title, preview, status, fileUrl = '', downloadH
     ? <DocumentPreview preview={preview} fileUrl={fileUrl} raw={raw} expanded={expandedNow} trusted={trusted} links={links} />
     : <>{status}</>;
 
-  const chrome = (expandedNow: boolean, toggleRef: React.RefObject<HTMLButtonElement | null>) => (
+  const folder = (preview?.name ?? title).includes('/') ? (preview?.name ?? title).slice(0, (preview?.name ?? title).lastIndexOf('/') + 1) : '';
+  const iconLink = 'inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground';
+  /** The reader's one row: where the document is, then what can be done with it, as quiet icons. */
+  const fillChrome = (expandedNow: boolean) => (
+    <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2 text-xs">
+      {leading}
+      <h3 className="min-w-0 flex-1 truncate font-normal" title={preview?.name ?? title}>
+        {folder && <span className="text-muted-foreground">{folder}</span>}
+        <span className="font-medium text-foreground">{title.slice(folder && title.startsWith(folder) ? folder.length : 0)}</span>
+      </h3>
+      {onToggleRaw && <Button size="xs" variant="ghost" className="shrink-0" onClick={onToggleRaw}>{raw ? rawLabels[1] : rawLabels[0]}</Button>}
+      {trustControl}
+      <Button size="xs" variant="ghost" className="size-7 shrink-0 p-0" aria-label={copiedPath ? 'Path copied' : `Copy path ${pathToCopy}`} title={copiedPath ? 'Path copied to clipboard' : 'Copy path'} onClick={handleCopyPath}>
+        {copiedPath ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+      </Button>
+      {downloadHref && (
+        <a className={iconLink} href={downloadHref} download={preview?.name.split('/').pop() ?? title.split('/').pop()} aria-label="Download" title="Download">
+          <Download size={13} />
+        </a>
+      )}
+      {browserHref && (
+        <a className={iconLink} href={browserHref} target="_blank" rel="noopener noreferrer" aria-label="Open in browser" title="Open in your browser, where the document runs as authored">
+          <ExternalLink size={13} />
+        </a>
+      )}
+      <Button ref={expandedNow ? overlayToggle : inlineToggle} size="xs" variant="ghost" className="size-7 shrink-0 p-0" aria-label="Expand document" aria-pressed={expandedNow}
+        title={expandedNow ? 'Collapse document' : 'Expand document'} onClick={() => setExpanded(value => !value)}>
+        {expandedNow ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+      </Button>
+      {onClose && (
+        <Button size="xs" variant="ghost" className="size-7 shrink-0 p-0" aria-label="Close document" title="Close document" onClick={() => { if (expandedNow) setExpanded(false); onClose(); }}>
+          <X size={13} />
+        </Button>
+      )}
+    </div>
+  );
+
+  const chrome = (expandedNow: boolean) => (
     <>
       <div className={cn('flex flex-wrap items-center justify-between gap-2', compact ? 'mb-2' : 'mb-3')}>
         <div className="flex items-center gap-2 min-w-0">
@@ -198,7 +241,7 @@ export function DocumentViewer({ title, preview, status, fileUrl = '', downloadH
             </a>
           )}
           <Button
-            ref={toggleRef}
+            ref={expandedNow ? overlayToggle : inlineToggle}
             size={buttonSize}
             variant="ghost"
             aria-label="Expand document"
@@ -218,12 +261,22 @@ export function DocumentViewer({ title, preview, status, fileUrl = '', downloadH
 
   return (
     <>
+      {fill ? (
+        <div className={cn('flex h-full min-h-0 flex-col', expanded && 'hidden', className)}>
+          {fillChrome(false)}
+          <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+            {guidance}
+            {body(false)}
+          </div>
+        </div>
+      ) : (
       <div className={cn(expanded && 'hidden', className)}>
-        {chrome(false, inlineToggle)}
+        {chrome(false)}
         <div className={cn('overflow-auto', expanded ? 'h-full' : 'max-h-[70vh]')}>
           {body(false)}
         </div>
       </div>
+      )}
       {expanded && typeof document !== 'undefined' && createPortal(
         <div
           ref={overlayRef}
@@ -233,14 +286,24 @@ export function DocumentViewer({ title, preview, status, fileUrl = '', downloadH
           aria-label={`Expanded ${title}`}
           data-testid="document-viewer-expanded"
         >
+          {fill ? (
+            <>
+              {fillChrome(true)}
+              <div className="flex min-h-0 flex-1 flex-col overflow-auto p-3 sm:p-4">
+                {guidance}
+                {body(true)}
+              </div>
+            </>
+          ) : (
           <div className="flex min-h-0 flex-1 flex-col p-3 sm:p-4">
             <div className="shrink-0 border-b border-border/60 pb-2 mb-2">
-              {chrome(true, overlayToggle)}
+              {chrome(true)}
             </div>
             <div className="flex min-h-0 flex-1 flex-col overflow-auto">
               {body(true)}
             </div>
           </div>
+          )}
         </div>,
         document.body,
       )}

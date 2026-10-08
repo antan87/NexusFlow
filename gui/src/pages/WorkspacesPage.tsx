@@ -745,8 +745,8 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           {showPanel && (
           <div className="relative flex min-w-0 flex-1 flex-col">
             {/* What is open, and the way back to the chat, which is always one click: the cross, or the rail item again.
-                Code carries these in its own toolbar, so it spends one row on controls instead of two. */}
-            {subTab !== 'changes' && (
+                Code and Docs carry these in their own toolbars, so each spends one row on controls instead of two. */}
+            {subTab !== 'changes' && subTab !== 'documents' && (
             <div className="z-10 flex shrink-0 items-center gap-0.5 border-b border-border/60 bg-background/95 px-6 py-1.5 backdrop-blur">
               {/* A label, not a heading: the part below names itself, and its region carries the same name. */}
               <p className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{SECTION_LABELS[subTab]}</p>
@@ -760,7 +760,12 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
               <CodeSection key={selected.branchName} ws={selected} active={subTab === 'changes'} {...codeSectionProps} showToast={showToast} panelActions={panelActions} />
             </div>
           )}
-          <div hidden={subTab === 'changes'} className="min-h-0 flex-1 overflow-y-auto">
+          {visitedSections.has('documents') && (
+            <div role="region" aria-label={SECTION_LABELS.documents} hidden={subTab !== 'documents'} className="min-h-0 flex-1">
+              <RootDocumentsPanel key={selected.branchName} workspaceId={selected.branchName} workspacePath={selected.workspacePath} panelActions={panelActions} />
+            </div>
+          )}
+          <div hidden={subTab === 'changes' || subTab === 'documents'} className="min-h-0 flex-1 overflow-y-auto">
         <div className="px-6 pb-12 pt-5">
           {/* Legacy Migration Alert Banner */}
           {isLegacy && (
@@ -1341,9 +1346,6 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
                   <SessionHistory ws={selected} showToast={showToast} {...sessionProps} />
                 </section>
               )}
-              {visitedSections.has('documents') && <div hidden={subTab !== 'documents'}>
-                <RootDocumentsPanel key={selected.branchName} workspaceId={selected.branchName} workspacePath={selected.workspacePath} />
-              </div>}
               {subTab === 'knowledge' && <KnowledgeBase ws={selected} {...knowledgeProps} readOnly={archived} />}
               {subTab === 'skills' && <WorkspaceSkillsTab ws={selected} showToast={showToast} />}
               {visitedSections.has('plan') && <div hidden={subTab !== 'plan'} className="space-y-6">

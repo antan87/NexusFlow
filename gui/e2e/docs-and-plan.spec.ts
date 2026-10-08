@@ -52,12 +52,12 @@ test.describe('Docs', () => {
     const pinned = docs(page).getByRole('list', { name: 'ContextSpace documents' });
     await expect(pinned.getByRole('button')).toHaveText([/^Knowledge/, /^Delivery plan/, /^Assistant instructions/]);
     // Your own documents are listed once, below; ContextSpace's files are not repeated there.
-    await expect(docs(page).getByRole('button', { name: /release-notes\.md/ })).toBeVisible();
-    await expect(docs(page).getByRole('button', { name: /AGENTS\.md/ })).toHaveCount(0);
+    await expect(docs(page).getByRole('treeitem', { name: /release-notes\.md/ })).toBeVisible();
+    await expect(docs(page).getByRole('treeitem', { name: /AGENTS\.md/ })).toHaveCount(0);
     // The filter reaches both groups.
     await docs(page).getByLabel('Filter documents').fill('delivery');
     await expect(pinned.getByRole('button')).toHaveText([/^Delivery plan/]);
-    await expect(docs(page).getByRole('button', { name: /release-notes\.md/ })).toHaveCount(0);
+    await expect(docs(page).getByRole('treeitem', { name: /release-notes\.md/ })).toHaveCount(0);
   });
 
   test('reads knowledge as entries you can search and filter, and shows the file on request', async ({ page }) => {
@@ -95,23 +95,24 @@ test.describe('Docs', () => {
     await expect(docs(page).getByRole('list', { name: 'Knowledge entries' })).toHaveCount(0);
   });
 
-  test('beside the chat, opening a document defaults to dedicated reader with quick-switch', async ({ page }) => {
+  test('beside the chat, a document takes the panel, and the list is one click away over it', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('contextspace_chat_layout_v1', JSON.stringify({ hidden: false, percent: 62 })));
     await mockDocuments(page);
     await page.goto('/#/workspaces/demo/documents');
     await docs(page).getByRole('button', { name: /^Delivery plan/ }).click();
     await expect(docs(page).getByRole('heading', { name: 'Delivery plan (contextspace-milestones.md)', exact: true })).toBeVisible();
-    // In dedicated reader mode, list is not stacked above it
+    // The document gets the narrow panel; the list is not stacked above it.
     const list = docs(page).getByRole('complementary', { name: 'Documents to open' });
     await expect(list).toBeHidden();
-    // Quick-switch moves to next document in 1 click
+    // Quick-switch moves to the next document in one click.
     await docs(page).getByRole('button', { name: 'Next document' }).click();
     await expect(docs(page).getByRole('heading', { name: 'Assistant instructions (AGENTS.md)', exact: true })).toBeVisible();
-    // Split view can be toggled to show the list side by side
-    await docs(page).getByRole('button', { name: 'Split view' }).click();
+    // The list opens over the document, and closes again once a document is chosen.
+    await docs(page).getByRole('button', { name: 'Show the document list' }).click();
     await expect(list).toBeVisible();
-    const [listBox, documentBox] = [await list.boundingBox(), await docs(page).getByRole('article', { name: 'Document preview' }).boundingBox()];
-    expect(documentBox!.x).toBeGreaterThan(listBox!.x);
+    await list.getByRole('treeitem', { name: /release-notes\.md/ }).click();
+    await expect(list).toBeHidden();
+    await expect(docs(page).getByRole('heading', { level: 3, name: 'release-notes.md', exact: true })).toBeVisible();
   });
 });
 
