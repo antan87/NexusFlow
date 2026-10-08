@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findWebLinks, isPathInsideWorkspace, isWebOrDomain, normalizeWebUrl } from './webLinks.js';
+import { findWebLinks, isWebOrDomain, normalizeWebUrl } from './webLinks.js';
 
 describe('webLinks', () => {
   it('finds URLs with schemes and wrapped in angle brackets', () => {
@@ -57,6 +57,14 @@ describe('webLinks', () => {
     expect(isWebOrDomain('file:///home/user/workspace/app.ts')).toBe(false);
   });
 
+  it('treats wrapped URLs, mail links, bare domains and local servers as web addresses', () => {
+    for (const url of ['https://github.com/mrpatronz/nexusflow', 'http://localhost:3000/api', '<https://example.com/docs>', '<http://127.0.0.1:8080>',
+      'mailto:team@example.com', '<mailto:user@example.com>', 'github.com/foo/bar', 'example.com:8080', 'localhost:3000', '127.0.0.1:3000/test', 'www.google.com']) {
+      expect(isWebOrDomain(url)).toBe(true);
+      expect(normalizeWebUrl(url)).toMatch(/^(?:https?:\/\/|mailto:)/);
+    }
+  });
+
   it('normalizes web URLs with appropriate protocols', () => {
     expect(normalizeWebUrl('https://example.com')).toBe('https://example.com');
     expect(normalizeWebUrl('<https://example.com>')).toBe('https://example.com');
@@ -68,19 +76,4 @@ describe('webLinks', () => {
     expect(normalizeWebUrl('//example.com/cdn')).toBe('https://example.com/cdn');
   });
 
-  it('checks if paths are inside the workspace and repos', () => {
-    const ws = '/home/user/workspace';
-    const repos = ['/home/user/workspace/repo1', '/home/user/workspace/repo2'];
-
-    expect(isPathInsideWorkspace('/home/user/workspace/repo1/src/index.ts', ws, repos)).toBe(true);
-    expect(isPathInsideWorkspace('file:///home/user/workspace/repo1/src/index.ts', ws, repos)).toBe(true);
-    expect(isPathInsideWorkspace('/home/user/workspace/file.md', ws, repos)).toBe(true);
-    expect(isPathInsideWorkspace('src/index.ts', ws, repos)).toBe(true);
-    expect(isPathInsideWorkspace('./README.md', ws, repos)).toBe(true);
-
-    expect(isPathInsideWorkspace('/etc/passwd', ws, repos)).toBe(false);
-    expect(isPathInsideWorkspace('file:///etc/passwd', ws, repos)).toBe(false);
-    expect(isPathInsideWorkspace('/tmp/foo.txt', ws, repos)).toBe(false);
-    expect(isPathInsideWorkspace('../../escape.txt', ws, repos)).toBe(false);
-  });
 });

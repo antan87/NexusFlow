@@ -41,10 +41,10 @@ test('one header shows where the task stands and links to where to act', async (
   await expect(page.getByRole('button', { name: 'Process DAG' })).toHaveCount(0);
 
   // The rail beside the panel: what can open beside the chat, with the changed files counted.
-  await expect(workspaceNav(page).getByRole('link')).toHaveText([/^Plan$/, /^Changes3$/, /^Docs$/, /^Skills/, /^Services$/]);
+  await expect(workspaceNav(page).getByRole('link')).toHaveText([/^Plan$/, /^Code3$/, /^Docs$/, /^Skills/, /^Services$/]);
   await status.getByRole('link', { name: /Changes/ }).click();
   await expect(page).toHaveURL(/#\/workspaces\/demo\/changes$/);
-  await expect(workspaceNav(page).getByRole('link', { name: /Changes/ })).toHaveAttribute('aria-current', 'page');
+  await expect(workspaceNav(page).getByRole('link', { name: /^Code/ })).toHaveAttribute('aria-current', 'page');
 });
 
 test('old section links still open, each marked on the rail when it has a place there, and back navigation works', async ({ page }) => {

@@ -22,17 +22,21 @@ test('reviews the actual worktree, switches diff mode, and copies refinement fee
   await expect(page.getByRole('heading', { level: 1, name: 'review' })).toBeVisible();
   // The one workspace header reports the changes and links to where they are reviewed.
   await expect(page.getByRole('group', { name: 'Task status' }).getByRole('link', { name: /Changes/ })).toContainText('1 file');
-  await expect(page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: /Changes/ })).toHaveAttribute('aria-current', 'page');
-  await page.getByRole('button', { name: 'Expand All', exact: true }).click();
-  await page.getByText('demo.ts', { exact: true }).first().click();
-  const fileMode = page.getByTitle('Toggle between Side-by-Side and Unified Diff view');
-  await expect(fileMode).toHaveText('Split');
-  await fileMode.click();
-  await expect(fileMode).toHaveText('Unified');
-  await fileMode.click();
-  await expect(fileMode).toHaveText('Split');
-  await expect(page.getByRole('button', { name: 'Accept (a)', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Refine', exact: true }).click();
+  await expect(page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: /^Code/ })).toHaveAttribute('aria-current', 'page');
+  const code = page.getByRole('region', { name: 'Workspace code' });
+  await code.getByRole('treeitem', { name: /demo\.ts/ }).click();
+  const diffToolbar = code.getByRole('toolbar', { name: 'Diff' });
+  const sideBySide = diffToolbar.getByRole('button', { name: 'Side by side' });
+  await expect(sideBySide).toHaveAttribute('aria-pressed', 'true');
+  await sideBySide.click();
+  await expect(sideBySide).toHaveAttribute('aria-pressed', 'false');
+  await sideBySide.click();
+  await expect(sideBySide).toHaveAttribute('aria-pressed', 'true');
+  // Accepting a change needs a caller that can apply it; the review does not offer it.
+  await diffToolbar.getByRole('button', { name: 'More diff options' }).click();
+  await expect(page.getByRole('menuitem', { name: /Accept this change/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await diffToolbar.getByRole('button', { name: /Refine/ }).click();
   await page.getByPlaceholder('e.g. Ensure null safety when calculating vacation debt...').fill('Use answer 3 instead.');
   await page.getByRole('button', { name: 'Copy for CLI chat', exact: true }).click();
   await expect(page.getByRole('region', { name: 'CLI Chat' })).toBeVisible();

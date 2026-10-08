@@ -678,282 +678,69 @@ describe('getAncestorPaths', () => {
   });
 });
 
-describe('FileTree Component Rendering & Controlled Expansion', () => {
+describe('FileTree component rendering', () => {
   const sampleFiles: TreeFile[] = [
     { file: 'README.md' },
     { file: 'src/components/Button.tsx' },
     { file: 'src/components/Dialog.tsx' },
     { file: 'src/utils/format.ts' },
   ];
+  const renderFileMock = (f: TreeFile) => createElement('span', { 'data-name': f.file }, f.file.split('/').at(-1));
+  const render = (props: Partial<Parameters<typeof FileTree<TreeFile>>[0]> = {}) => renderToStaticMarkup(
+    createElement(FileTree<TreeFile>, { files: sampleFiles, renderFile: renderFileMock, label: 'Workspace files', ...props }),
+  );
 
-  const renderFileMock = (f: TreeFile) =>
-    createElement('button', { type: 'button', 'data-name': f.file }, f.file);
-
-  it('implements smart default: collapsed for files mode (reducing initial DOM from 5,000+ nodes to root level only)', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Workspace files',
-        defaultExpanded: false,
-      })
-    );
-
-    // Root file is rendered
+  it('starts with folders closed when defaultExpanded is false, rendering only the top level', () => {
+    const html = render({ defaultExpanded: false });
     expect(html).toContain('README.md');
-
-    // Root directory summary is rendered with folder name
     expect(html).toContain('<span class="truncate">src</span>');
-
-    // No details elements have the open attribute
-    expect(html).not.toContain('<details open');
-    expect(html).toContain('<details');
-
-    // Crucially: nested file buttons are NOT in the DOM markup!
+    expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain('Button.tsx');
-    expect(html).not.toContain('Dialog.tsx');
     expect(html).not.toContain('format.ts');
   });
 
-  it('implements smart default: expanded by default for changes mode', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Workspace changes',
-        defaultExpanded: true,
-      })
-    );
-
-    // Directory details are open
-    expect(html).toContain('<details open=""');
-
-    // All files, including deeply nested files, are rendered
-    expect(html).toContain('Button.tsx');
-    expect(html).toContain('Dialog.tsx');
-    expect(html).toContain('format.ts');
-    expect(html).toContain('README.md');
+  it('starts with every folder open by default', () => {
+    const html = render();
+    expect(html).not.toContain('aria-expanded="false"');
+    for (const name of ['Button.tsx', 'Dialog.tsx', 'format.ts', 'README.md']) expect(html).toContain(name);
   });
 
-  it('supports controlled expandedPaths state with precise branch expansion', () => {
-    // Expand 'src' and 'src/components', keeping 'src/utils' collapsed
-    const expanded = new Set(['src', 'src/components']);
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Workspace code',
-        expandedPaths: expanded,
-      })
-    );
-
-    // src/components is open and contains its files
-    expect(html).toContain('<details open="" data-path="src/components"');
+  it('shows exactly the folders a controlled expandedPaths opens', () => {
+    const html = render({ expandedPaths: new Set(['src', 'src/components']) });
+    expect(html).toContain('data-path="src/components"');
     expect(html).toContain('Button.tsx');
-    expect(html).toContain('Dialog.tsx');
-
-    // src/utils is closed and does NOT contain its files
-    expect(html).toContain('<details data-path="src/utils"');
+    expect(html).toContain('data-path="src/utils"');
     expect(html).not.toContain('format.ts');
   });
 
-  it('reduces sidebar indentation margin from 20px (ml-3 pl-2) to 14px (ml-2 pl-1.5)', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Indentation check',
-        defaultExpanded: true,
-      })
-    );
-
-    // New compact indentation
-    expect(html).toContain('class="ml-2 border-l border-border pl-1.5"');
-    // Does not use the old wide indentation
-    expect(html).not.toContain('ml-3 border-l border-border pl-2');
+  it('renders no rows inside closed folders for an empty controlled set (Collapse All)', () => {
+    const html = render({ expandedPaths: new Set() });
+    expect(html).not.toContain('Button.tsx');
+    expect(html).not.toContain('data-path="src/components"');
   });
 
-  it('attaches data-file-path attributes for smooth scrollIntoView targeting', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Scroll check',
-        defaultExpanded: true,
-      })
-    );
+  it('indents each level with one 12px guide instead of nested margins', () => {
+    const html = render({ expandedPaths: new Set(['src', 'src/components']) });
+    const buttonRow = html.slice(html.indexOf('data-file-path="src/components/Button.tsx"'));
+    const row = buttonRow.slice(0, buttonRow.indexOf('</li>'));
+    expect(row.match(/border-l border-border\/70/g)).toHaveLength(2);
+  });
 
+  it('opens the folders above the selected file even when folders start closed', () => {
+    const html = render({ selectedPath: 'src/components/Button.tsx', defaultExpanded: false });
     expect(html).toContain('data-file-path="src/components/Button.tsx"');
-    expect(html).toContain('data-file-path="src/utils/format.ts"');
-    expect(html).toContain('data-file-path="README.md"');
-  });
-
-  it('simulates Expand All action by expanding all directory paths', () => {
-    const root = buildCompactedTree(sampleFiles);
-    const allPaths = getAllDirectoryPaths(root);
-    const allExpandedSet = new Set(allPaths);
-
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Expand All test',
-        expandedPaths: allExpandedSet,
-      })
-    );
-
-    // All directory details have open=""
-    const detailsMatches = html.match(/<details[^>]*open=""/g) || [];
-    expect(detailsMatches).toHaveLength(allPaths.length);
-
-    // All nested files are in the DOM
-    expect(html).toContain('Button.tsx');
-    expect(html).toContain('Dialog.tsx');
-    expect(html).toContain('format.ts');
-  });
-
-  it('simulates Collapse All action by providing an empty Set', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Collapse All test',
-        expandedPaths: new Set(),
-      })
-    );
-
-    // 0 details elements have open=""
-    expect(html).not.toContain('open=""');
-
-    // 0 nested files are in the DOM
-    expect(html).not.toContain('Button.tsx');
-    expect(html).not.toContain('Dialog.tsx');
     expect(html).not.toContain('format.ts');
-
-    // Root file is still visible
-    expect(html).toContain('README.md');
   });
 
-  it('preserves manual collapse state across simulated polling re-renders', () => {
-    // Initial state: user had manually collapsed 'src/components', keeping 'src' and 'src/utils' open
-    const userState = new Set(['src', 'src/utils']);
-
-    // First render (e.g. before polling)
-    const render1 = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Polling test',
-        expandedPaths: userState,
-      })
-    );
-    expect(render1).not.toContain('Button.tsx');
-    expect(render1).toContain('format.ts');
-
-    // Simulate polling update 10 seconds later: updated file items with new references
-    const updatedFiles: TreeFile[] = [
-      { file: 'README.md' },
-      { file: 'src/components/Button.tsx' },
-      { file: 'src/components/Dialog.tsx' },
-      { file: 'src/utils/format.ts' },
-      { file: 'src/utils/newHelper.ts' },
-    ];
-
-    // Second render after poll using the preserved user state
-    const render2 = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: updatedFiles,
-        renderFile: renderFileMock,
-        label: 'Polling test',
-        expandedPaths: userState,
-      })
-    );
-
-    // Manual collapse did NOT snap back open!
-    expect(render2).not.toContain('Button.tsx');
-    // Open folder correctly reflects newly polled file
-    expect(render2).toContain('format.ts');
-    expect(render2).toContain('newHelper.ts');
+  it('marks rows with normalized paths for targeting', () => {
+    const html = render({ files: [{ file: './src\\app.ts' }] });
+    expect(html).toContain('data-file-path="src/app.ts"');
   });
 
-  it('auto-expands ancestor branches when revealing a selected file', () => {
-    const root = buildCompactedTree(sampleFiles);
-    // User selects 'src/components/Button.tsx'
-    const targetFile = 'src/components/Button.tsx';
-    const ancestors = getAncestorPaths(root, targetFile);
-
-    // Initially collapsed
-    const collapsedPaths = new Set<string>();
-
-    // Simulating auto-expansion on selection: add ancestors to expandedPaths
-    const afterSelectionPaths = new Set(collapsedPaths);
-    for (const a of ancestors) {
-      afterSelectionPaths.add(a);
-    }
-
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Selection reveal test',
-        expandedPaths: afterSelectionPaths,
-        revealPath: targetFile,
-      })
-    );
-
-    // Ancestor 'src/components' is now expanded!
-    expect(html).toContain('<details open="" data-path="src/components"');
-    expect(html).toContain('Button.tsx');
-  });
-
-  it('preserves collapsed state in uncontrolled mode when new directories are added dynamically', () => {
-    // Initial directories: 'src/components', 'src/utils'
-    const initialPaths = ['src/components', 'src/utils'];
-    const prevKey = initialPaths.join('|');
-
-    // User had manually collapsed 'src/components', keeping 'src/utils'
-    const userState = new Set(['src/utils']);
-
-    // Dynamically added directory 'docs/guide'
-    const updatedPaths = ['docs/guide', 'src/components', 'src/utils'];
-
-    const oldPaths = new Set(prevKey.split('|').filter(Boolean));
-    const nextState = new Set(userState);
-    for (const p of updatedPaths) {
-      if (!oldPaths.has(p)) {
-        nextState.add(p);
-      }
-    }
-    const allSet = new Set(updatedPaths);
-    for (const p of nextState) {
-      if (!allSet.has(p)) {
-        nextState.delete(p);
-      }
-    }
-
-    // Newly added directory is expanded
-    expect(nextState.has('docs/guide')).toBe(true);
-    // User collapsed directory did NOT snap back open
-    expect(nextState.has('src/components')).toBe(false);
-    // Previously open directory remains open
-    expect(nextState.has('src/utils')).toBe(true);
-  });
-
-  it('normalizes target file paths for scrollIntoView targeting', () => {
-    const rawTarget = './/src\\components\\\\Button.tsx';
-    const normalized = normalizePath(rawTarget);
-    expect(normalized).toBe('src/components/Button.tsx');
-
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Normalization targeting',
-        defaultExpanded: true,
-      })
-    );
-
-    expect(html).toContain(`data-file-path="${normalized}"`);
+  it('gives the selected row the selected look and the others none', () => {
+    const html = render({ selectedPath: 'README.md' });
+    const readme = html.slice(html.lastIndexOf('<li', html.indexOf('data-file-path="README.md"')));
+    expect(readme.slice(0, readme.indexOf('>'))).toContain('bg-accent font-medium');
   });
 });
 
@@ -1054,65 +841,6 @@ describe('getMatchingBranchPaths', () => {
   });
 });
 
-describe('FileTree Search Filtering & Branch Auto-Expansion', () => {
-  const sampleFiles: TreeFile[] = [
-    { file: 'README.md' },
-    { file: 'src/components/Button.tsx' },
-    { file: 'src/components/Dialog.tsx' },
-    { file: 'src/utils/format.ts' },
-  ];
-
-  const renderFileMock = (f: TreeFile) => createElement('span', null, f.file.split('/').at(-1));
-
-  it('renders only matching files when searchQuery prop is provided', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Search filtering test',
-        searchQuery: 'Button',
-      })
-    );
-
-    expect(html).toContain('Button.tsx');
-    expect(html).not.toContain('Dialog.tsx');
-    expect(html).not.toContain('format.ts');
-    expect(html).not.toContain('README.md');
-  });
-
-  it('automatically expands directory branches containing matching files in uncontrolled mode', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Auto-expansion test',
-        searchQuery: 'format',
-        defaultExpanded: false, // would normally be collapsed
-      })
-    );
-
-    // Matching directory 'src/utils' MUST be automatically expanded (<details open=...>)
-    expect(html).toContain('<details open="" data-path="src/utils"');
-    expect(html).toContain('format.ts');
-  });
-
-  it('renders empty tree when search query has no matches', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'No matches test',
-        searchQuery: 'notfound_query',
-      })
-    );
-
-    expect(html).not.toContain('Button.tsx');
-    expect(html).not.toContain('Dialog.tsx');
-    expect(html).not.toContain('format.ts');
-    expect(html).not.toContain('README.md');
-  });
-});
-
 describe('getVisibleTreeRows', () => {
   const sampleFiles: TreeFile[] = [
     { file: 'README.md' },
@@ -1125,7 +853,7 @@ describe('getVisibleTreeRows', () => {
     const root = buildCompactedTree(sampleFiles);
     const visible = getVisibleTreeRows(root, new Set());
 
-    expect(visible).toEqual([
+    expect(visible).toMatchObject([
       {
         type: 'folder',
         id: 'dir:src',
@@ -1148,7 +876,7 @@ describe('getVisibleTreeRows', () => {
     const root = buildCompactedTree(sampleFiles);
     const visible = getVisibleTreeRows(root, new Set(['src']));
 
-    expect(visible).toEqual([
+    expect(visible).toMatchObject([
       {
         type: 'folder',
         id: 'dir:src',
@@ -1198,10 +926,24 @@ describe('getVisibleTreeRows', () => {
     ]);
   });
 
+  it('states the level, position and number of siblings of each row for assistive technology', () => {
+    const root = buildCompactedTree(sampleFiles);
+    const visible = getVisibleTreeRows(root, new Set(['src', 'src/components']));
+    expect(visible.map(({ id, level, posinset, setsize }) => ({ id, level, posinset, setsize }))).toEqual([
+      { id: 'dir:src', level: 1, posinset: 1, setsize: 2 },
+      { id: 'dir:src/components', level: 2, posinset: 1, setsize: 2 },
+      { id: 'file:src/components/Button.tsx', level: 3, posinset: 1, setsize: 2 },
+      { id: 'file:src/components/Dialog.tsx', level: 3, posinset: 2, setsize: 2 },
+      { id: 'dir:src/utils', level: 2, posinset: 2, setsize: 2 },
+      { id: 'file:README.md', level: 1, posinset: 2, setsize: 2 },
+    ]);
+    expect(visible[2]!.file).toBe(sampleFiles[1]);
+  });
+
   it('handles empty trees gracefully', () => {
     const root = buildCompactedTree([]);
     const visible = getVisibleTreeRows(root, new Set());
-    expect(visible).toEqual([]);
+    expect(visible).toMatchObject([]);
   });
 });
 
@@ -1308,198 +1050,84 @@ describe('computeTreeKeyNavigation (Arrow Key Navigation & Keyboard Model)', () 
   });
 });
 
-describe('WAI-ARIA Treeview Markup & Semantic Accessibility', () => {
+describe('WAI-ARIA tree markup', () => {
   const sampleFiles: TreeFile[] = [
     { file: 'README.md' },
     { file: 'src/components/Button.tsx' },
     { file: 'src/utils/format.ts' },
   ];
-  const renderFileMock = (f: TreeFile) =>
-    createElement('button', { type: 'button', 'data-name': f.file }, f.file);
+  const renderFileMock = (f: TreeFile) => createElement('span', null, f.file);
+  const render = (props: Partial<Parameters<typeof FileTree<TreeFile>>[0]> = {}) => renderToStaticMarkup(
+    createElement(FileTree<TreeFile>, { files: sampleFiles, renderFile: renderFileMock, label: 'Source files tree', ...props }),
+  );
+  const rowOf = (html: string, attribute: string) => {
+    const start = html.lastIndexOf('<li', html.indexOf(attribute));
+    return html.slice(start, html.indexOf('>', start) + 1);
+  };
 
-  it('renders root ul with role="tree" and accessible aria-label', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Source files tree',
-        defaultExpanded: true,
-      })
-    );
-
-    expect(html).toContain('role="tree"');
-    expect(html).toContain('aria-label="Source files tree"');
+  it('renders one flat role="tree" list with its label and no nested groups or disclosure widgets', () => {
+    const html = render();
+    expect(html).toContain('role="tree" aria-label="Source files tree"');
+    expect(html).not.toContain('role="group"');
+    expect(html).not.toContain('<details');
+    expect(html).not.toContain('<summary');
+    expect(html).not.toContain('<nav');
   });
 
-  it('renders directory items with role="treeitem" and correct aria-expanded state', () => {
-    const expandedHtml = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Expanded tree',
-        expandedPaths: new Set(['src', 'src/components', 'src/utils']),
-      })
-    );
-
-    expect(expandedHtml).toContain('role="treeitem" aria-expanded="true"');
-    expect(expandedHtml).toContain('data-tree-row="folder"');
-
-    const collapsedHtml = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Collapsed tree',
-        expandedPaths: new Set(),
-      })
-    );
-
-    expect(collapsedHtml).toContain('role="treeitem" aria-expanded="false"');
+  it('puts the tree item state on the row itself: level, expansion, selection', () => {
+    const html = render({ selectedPath: 'README.md', expandedPaths: new Set(['src', 'src/components']) });
+    const folder = rowOf(html, 'data-path="src/components"');
+    expect(folder).toContain('role="treeitem"');
+    expect(folder).toContain('aria-level="2"');
+    expect(folder).toContain('aria-expanded="true"');
+    expect(folder).not.toContain('aria-selected');
+    expect(rowOf(html, 'data-path="src/utils"')).toContain('aria-expanded="false"');
+    expect(rowOf(html, 'data-file-path="README.md"')).toContain('aria-selected="true"');
+    expect(rowOf(html, 'data-file-path="src/components/Button.tsx"')).toContain('aria-selected="false"');
   });
 
-  it('renders subdirectories inside nested ul with role="group"', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Group check',
-        expandedPaths: new Set(['src']),
-      })
-    );
-
-    expect(html).toContain('role="group"');
+  it('leaves the row content free of focusable controls and selection state', () => {
+    const html = render({ selectedPath: 'README.md' });
+    expect(html.match(/tabindex=/g)?.length).toBe(html.match(/role="treeitem"/g)?.length);
+    expect(html).not.toContain('<button');
   });
 
-  it('renders file items with role="treeitem" and aria-selected state', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Selected check',
-        selectedPath: 'README.md',
-        defaultExpanded: true,
-      })
-    );
-
-    expect(html).toContain('data-file-path="README.md"');
-    expect(html).toContain('role="treeitem" aria-selected="true"');
-    expect(html).toContain('data-file-path="src/components/Button.tsx"');
-    expect(html).toContain('aria-selected="false"');
-  });
-
-  it('applies performance rendering optimizations: tree-row-wrapper class and content-visibility styling', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Performance check',
-        defaultExpanded: true,
-      })
-    );
-
-    expect(html).toContain('tree-row-wrapper');
-    expect(html).toContain('content-visibility:auto');
-    expect(html).toContain('contain-intrinsic-size:auto 28px');
+  it('marks rows for cheap off-screen rendering through one class', () => {
+    const html = render();
+    expect(html).toContain('tree-row');
+    expect(html).not.toContain('content-visibility');
   });
 });
 
-describe('Roving Tabindex Behavior', () => {
+describe('Roving tab stop', () => {
   const sampleFiles: TreeFile[] = [
     { file: 'README.md' },
     { file: 'src/components/Button.tsx' },
     { file: 'src/utils/format.ts' },
   ];
-  const renderFileMock = (f: TreeFile, meta?: { isSelected: boolean; tabIndex: number }) =>
-    createElement('button', { type: 'button', tabIndex: meta?.tabIndex }, f.file);
+  const render = (props: Partial<Parameters<typeof FileTree<TreeFile>>[0]> = {}) => renderToStaticMarkup(
+    createElement(FileTree<TreeFile>, { files: sampleFiles, renderFile: (f: TreeFile) => createElement('span', null, f.file), label: 'Roving', ...props }),
+  );
+  const tabStops = (html: string) => [...html.matchAll(/<li[^>]*data-row-id="([^"]+)"[^>]*tabindex="0"/g)].map((match) => match[1]);
 
-  it('assigns tabIndex=0 to first row and tabIndex=-1 to all subsequent rows when unselected', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Roving tabindex unselected',
-        defaultExpanded: false,
-      })
-    );
-
-    // In visual tree order, 'src' folder comes first: it should have tabindex="0"
-    expect(html).toContain('data-path="src" tabindex="0"');
-    // README.md file comes second: it should have tabindex="-1"
-    expect(html).toContain('tabindex="-1" data-file-path="README.md"');
+  it('makes the first row the only tab stop when nothing is selected', () => {
+    expect(tabStops(render({ defaultExpanded: false }))).toEqual(['dir:src']);
   });
 
-  it('assigns tabIndex=0 to selected file and tabIndex=-1 to all other rows', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Roving tabindex with selection',
-        selectedPath: 'README.md',
-        defaultExpanded: true,
-      })
-    );
-
-    expect(html).toContain('tabindex="0" data-file-path="README.md"');
-    expect(html).toContain('data-path="src" tabindex="-1"');
-    expect(html).toContain('tabindex="-1" data-file-path="src/components/Button.tsx"');
-    expect(html).toContain('tabindex="-1" data-file-path="src/utils/format.ts"');
+  it('makes the selected file the only tab stop', () => {
+    expect(tabStops(render({ selectedPath: 'README.md' }))).toEqual(['file:README.md']);
+    expect(tabStops(render({ selectedPath: 'src/components/Button.tsx' }))).toEqual(['file:src/components/Button.tsx']);
   });
 
-  it('assigns tabIndex=0 to nested selected file when expanded', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Nested selection roving tabindex',
-        selectedPath: 'src/components/Button.tsx',
-        defaultExpanded: true,
-      })
-    );
-
-    expect(html).toContain('tabindex="0" data-file-path="src/components/Button.tsx"');
-    expect(html).toContain('data-path="src" tabindex="-1"');
-    expect(html).toContain('tabindex="-1" data-file-path="README.md"');
-  });
-
-  it('clones tabIndex and aria-selected onto custom renderFile element', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: (f, meta) =>
-          createElement('span', { className: 'custom-file-row', 'data-tab': meta?.tabIndex }, f.file),
-        label: 'Cloned props test',
-        selectedPath: 'README.md',
-        defaultExpanded: true,
-      })
-    );
-
-    expect(html).toContain('data-tree-row="file"');
-    expect(html).toContain('data-file-path="README.md"');
-    expect(html).toContain('tabindex="0"');
-    expect(html).toContain('aria-selected="true"');
-  });
-
-  it('falls back to tabIndex=0 on the first visible folder when selected file is in a collapsed directory', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Collapsed selection fallback',
-        selectedPath: 'src/components/Button.tsx',
-        expandedPaths: new Set(),
-      })
-    );
-
-    // src folder is the first visible row -> has tabindex="0"
-    expect(html).toContain('data-path="src" tabindex="0"');
-    // README.md is visible second row -> tabindex="-1"
-    expect(html).toContain('tabindex="-1" data-file-path="README.md"');
-    // Button.tsx is inside collapsed folder, so not in the rendered DOM
+  it('falls back to the first row when the selected file is inside a closed folder', () => {
+    const html = render({ selectedPath: 'src/components/Button.tsx', expandedPaths: new Set() });
+    expect(tabStops(html)).toEqual(['dir:src']);
     expect(html).not.toContain('data-file-path="src/components/Button.tsx"');
   });
 
   it('climbs directory hierarchy step-by-step with ArrowLeft', () => {
     const deepRows: VisibleTreeRow[] = [
-      { type: 'folder', id: 'dir:src', path: 'src', name: 'src', parentPath: null, isExpanded: true },
+      { type: 'folder', id: 'dir:src', path: 'src', name: 'src', parentPath: null, isExpanded: true, level: 1, posinset: 1, setsize: 1 },
       { type: 'folder', id: 'dir:src/components', path: 'src/components', name: 'components', parentPath: 'src', isExpanded: true },
       { type: 'folder', id: 'dir:src/components/ui', path: 'src/components/ui', name: 'ui', parentPath: 'src/components', isExpanded: false },
       { type: 'file', id: 'file:src/components/ui/Button.tsx', path: 'src/components/ui/Button.tsx', name: 'Button.tsx', parentPath: 'src/components/ui' },
@@ -1517,13 +1145,12 @@ describe('Roving Tabindex Behavior', () => {
     const action3 = computeTreeKeyNavigation('ArrowLeft', deepRows[1], deepRows);
     expect(action3).toEqual({ type: 'toggle', path: 'src/components' });
   });
-
   it('computes visible rows and keyboard actions correctly with filtered search results', () => {
     const query = 'format';
     const filteredFiles = filterTreeFiles(sampleFiles, query);
     const root = buildCompactedTree(filteredFiles);
     const visible = getVisibleTreeRows(root, new Set(['src/utils']));
-    expect(visible).toEqual([
+    expect(visible).toMatchObject([
       { type: 'folder', id: 'dir:src/utils', path: 'src/utils', name: 'src/utils', parentPath: null, isExpanded: true },
       { type: 'file', id: 'file:src/utils/format.ts', path: 'src/utils/format.ts', name: 'format.ts', parentPath: 'src/utils' },
     ]);
@@ -1534,14 +1161,13 @@ describe('Roving Tabindex Behavior', () => {
     const upAction = computeTreeKeyNavigation('ArrowUp', visible[1], visible);
     expect(upAction).toEqual({ type: 'focus', targetRow: visible[0] });
   });
-
   it('normalizes Windows backslashes to extract proper file names in getVisibleTreeRows', () => {
     const winFiles: TreeFile[] = [
       { file: 'src\\components\\ui\\Modal.tsx' },
     ];
     const root = buildCompactedTree(winFiles);
     const visible = getVisibleTreeRows(root, new Set(['src/components/ui']));
-    expect(visible).toEqual([
+    expect(visible).toMatchObject([
       {
         type: 'folder',
         id: 'dir:src/components/ui',
@@ -1559,24 +1185,6 @@ describe('Roving Tabindex Behavior', () => {
       },
     ]);
   });
-
-  it('auto-expands ancestor directories when selectedPath is provided without revealPath', () => {
-    const html = renderToStaticMarkup(
-      createElement(FileTree, {
-        files: sampleFiles,
-        renderFile: renderFileMock,
-        label: 'Selected path without revealPath',
-        selectedPath: 'src/components/Button.tsx',
-        defaultExpanded: false,
-      })
-    );
-
-    // Parent folder 'src' and 'src/components' are auto-expanded
-    expect(html).toContain('data-path="src"');
-    expect(html).toContain('data-file-path="src/components/Button.tsx"');
-    expect(html).toContain('tabindex="0" data-file-path="src/components/Button.tsx"');
-  });
-
   it('preserves roving tabindex without focus loss during repeated directory toggle', () => {
     const root = buildCompactedTree(sampleFiles);
     const expanded = new Set(['src']);
@@ -1601,8 +1209,3 @@ describe('Roving Tabindex Behavior', () => {
     expect(visible.map(r => r.id)).toContain('dir:src/components');
   });
 });
-
-
-
-
-

@@ -89,49 +89,6 @@ export function isWebOrDomain(raw: string): boolean {
   return false;
 }
 
-export function isPathInsideWorkspace(filePath: string, workspacePath: string, repoPaths?: string[]): boolean {
-  let target = filePath.replace(/\\/g, '/').trim();
-  while (target.startsWith('<') && target.endsWith('>')) {
-    target = target.slice(1, -1).trim();
-  }
-  if (!target) return false;
-
-  if (/^file:\/\//i.test(target)) {
-    try {
-      target = decodeURIComponent(new URL(target).pathname).replace(/^\/([a-z]:\/)/i, '$1');
-    } catch {
-      target = target.replace(/^file:\/\//i, '');
-    }
-  }
-
-  const isAbsolute = target.startsWith('/') || /^[a-z]:\//i.test(target);
-  if (!isAbsolute) {
-    const segments = target.split('/');
-    let depth = 0;
-    for (const seg of segments) {
-      if (!seg || seg === '.') continue;
-      if (seg === '..') {
-        depth--;
-        if (depth < 0) return false;
-      } else {
-        depth++;
-      }
-    }
-    return true;
-  }
-  const roots = [workspacePath, ...(repoPaths ?? [])].filter(Boolean);
-  for (const root of roots) {
-    const normRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
-    const isWindows = /^[a-z]:\//i.test(normRoot);
-    const candidate = isWindows ? target.toLowerCase() : target;
-    const prefix = (isWindows ? normRoot.toLowerCase() : normRoot) + '/';
-    if (candidate === (isWindows ? normRoot.toLowerCase() : normRoot) || candidate.startsWith(prefix)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 export function findWebLinks(row: string): WebLink[] {
   const result: WebLink[] = [];
   const covered: [number, number][] = [];

@@ -21,7 +21,7 @@ describe('PluggableDiffViewer & Diff Adapters', () => {
     ' line 52',
   ].join('\n');
 
-  it('renders section tabs for all parsed hunks with addition/deletion indicators', () => {
+  it('shows which change is in view in one slim toolbar, with the way to the next and previous one', () => {
     const html = renderToStaticMarkup(
       createElement(PluggableDiffViewer, {
         filePath: 'src/index.ts',
@@ -30,16 +30,14 @@ describe('PluggableDiffViewer & Diff Adapters', () => {
       })
     );
 
-    // Header has file name
-    expect(html).toContain('src/index.ts');
-    // Section tabs exist
-    expect(html).toContain('Changes (2)');
-    expect(html).toContain('Section 1');
-    expect(html).toContain('Section 2');
-    // Addition/deletion indicators
-    expect(html).toContain('+1');
-    // Triage navigation controls
-    expect(html).toContain('Hunk <strong class="text-foreground">1</strong> of 2');
+    expect(html).toContain('role="toolbar" aria-label="Diff"');
+    expect(html).toContain('Change 1 of 2');
+    expect(html).toContain('aria-label="Previous change"');
+    expect(html).toContain('aria-label="Next change"');
+    expect(html).toContain('aria-label="More diff options"');
+    // No second toolbar, tab strip or bottom bar repeating the same controls.
+    expect(html).not.toContain('role="tablist"');
+    expect(html).not.toContain('Hunk <strong');
   });
 
   it('separates real line numbers from snippet lines when fullFileContent is absent', () => {
@@ -100,39 +98,22 @@ describe('PluggableDiffViewer & Diff Adapters', () => {
     expect(html).toContain('data-diff-marker="-"');
   });
 
-  it('renders section tabs and editor button targeting first changed line instead of unchanged context line', () => {
-    const html = renderToStaticMarkup(
-      createElement(PluggableDiffViewer, {
-        filePath: 'src/index.ts',
-        repoName: 'nexusflow',
-        patchText: samplePatch,
-        defaultEditor: 'vscode',
-      })
-    );
-
-    // In samplePatch:
-    // Hunk 1 starts with context at line 10, first change is line 11 added.
-    // Hunk 2 starts with context at line 51, first change is line 52 (old line 51 -> new line 52).
-    // Section tabs should target first changed line
-    expect(html).toContain('title="Jump to change section #1: line 11"');
-    expect(html).toContain('title="Jump to change section #2: line 52"');
-
-    // External editor button should target line 11 (the actual change) rather than line 10 (unchanged context)
-    expect(html).toContain(':L11');
+  it('targets the first changed line of each change, not its leading context', () => {
+    // Change 1 starts with context at line 10 and adds line 11; change 2 starts at 51 and replaces line 52.
+    const { hunks } = parseUnifiedDiff(samplePatch);
+    expect(hunks.map((hunk) => hunk.firstChangedLineModified)).toEqual([11, 52]);
   });
 
-  it('renders external editor button with configured defaultEditor label', () => {
-    const html = renderToStaticMarkup(
-      createElement(PluggableDiffViewer, {
-        filePath: 'src/index.ts',
-        repoName: 'nexusflow',
-        patchText: samplePatch,
-        defaultEditor: 'cursor',
-      })
-    );
-
-    expect(html).toContain('Cursor');
-    expect(html).toContain('Open file in Cursor');
+  it('offers Refine only when the caller can act on it, and moves past the last change to the next file', () => {
+    const plain = renderToStaticMarkup(createElement(PluggableDiffViewer, { filePath: 'src/index.ts', repoName: 'nexusflow', patchText: samplePatch }));
+    expect(plain).not.toContain('Refine');
+    const withRefine = renderToStaticMarkup(createElement(PluggableDiffViewer, {
+      filePath: 'src/index.ts', repoName: 'nexusflow', patchText: samplePatch,
+      onRequestRefine: () => undefined, onPrevFile: () => undefined,
+    }));
+    expect(withRefine).toContain('Refine');
+    // At the first change, the previous button goes to the previous file instead of doing nothing.
+    expect(withRefine).toContain('aria-label="Previous file"');
   });
 
   it('renders empty diff message gracefully when patch is empty', () => {

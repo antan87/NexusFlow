@@ -220,7 +220,6 @@ function AppInner() {
   const [transcript, setTranscript] = useState<TranscriptMessage[]>([]);
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [gitChanges, setGitChanges] = useState<any[]>([]);
-  const [gitChangesLoading, setGitChangesLoading] = useState(false);
   const [knowledgeContent, setKnowledgeContent] = useState<string>('');
   const [knowledgeLoading, setKnowledgeLoading] = useState<boolean>(false);
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
@@ -542,7 +541,6 @@ function AppInner() {
   const fetchGitChanges = async (wsId: string) => {
     const signal = beginWorkspaceLoad(workspaceLoadsRef.current, 'changes');
     const isCurrent = () => !signal.aborted && activeWorkspaceRef.current === wsId;
-    setGitChangesLoading(true);
     try {
       const encodedId = encodeURIComponent(wsId);
       const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/changes`, { signal });
@@ -555,8 +553,6 @@ function AppInner() {
       rememberWorkspaceData(recentWorkspaceDataRef.current, wsId, { changes });
     } catch (e) {
       if (isCurrent()) console.error(e);
-    } finally {
-      if (isCurrent()) setGitChangesLoading(false);
     }
   };
 
@@ -877,7 +873,6 @@ function AppInner() {
     setSessions(recent?.sessions ?? []);
     setSessionsLoading(false);
     setGitChanges(recent?.changes ?? []);
-    setGitChangesLoading(false);
     setKnowledgeContent('');
     setKnowledgeError(null);
     setKnowledgeLoading(false);
@@ -1103,7 +1098,7 @@ Core Instructions:
       addRepoLoading={addRepoLoading}
       handleAddRepo={handleAddRepo}
       sessionProps={{ sessions, sessionsLoading, setActiveSession, setTranscript, fetchSessionTranscript, handleOpenDesktopSession, showToast }}
-      changesProps={{ gitChanges, gitChangesLoading, syncLoading, syncResults, commitMessage, showCommitModal, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll }}
+      changesProps={{ gitChanges, syncLoading, syncResults, commitMessage, showCommitModal, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll }}
       knowledgeProps={{
         knowledgeContent,
         knowledgeLoading,

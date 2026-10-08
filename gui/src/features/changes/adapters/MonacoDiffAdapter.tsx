@@ -127,7 +127,7 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
     const modifiedEditor = editorInstanceRef.current.getModifiedEditor();
     modifiedEditor.revealLineInCenter(targetLine);
     modifiedEditor.setPosition({ lineNumber: targetLine, column: 1 });
-    modifiedEditor.focus();
+    // Scrolling to a line does not take the focus: a path clicked in the terminal must leave the keyboard there.
 
     // Flash highlight on the target line
     if (!decorationCollectionRef.current) {
@@ -179,6 +179,9 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
       diffEditor = monaco.editor.createDiffEditor(containerRef.current, {
         readOnly: true,
         renderSideBySide: viewMode === 'side-by-side',
+        // Monaco turns side by side into inline below 900px by default; a side panel is often narrower than that
+        // while still roomy enough, and the toggle should show what the user chose.
+        renderSideBySideInlineBreakpoint: 560,
         ignoreTrimWhitespace: ignoreWhitespace,
         hideUnchangedRegions: {
           enabled: false,
@@ -187,7 +190,8 @@ export const MonacoDiffAdapter: React.FC<MonacoDiffAdapterProps> = ({
         originalEditable: false,
         automaticLayout: true,
         scrollBeyondLastLine: false,
-        minimap: { enabled: true, maxColumn: 60 },
+        // The overview ruler beside the scrollbar marks every change; a minimap only crowds a side panel.
+        minimap: { enabled: false },
         scrollbar: {
           verticalScrollbarSize: 8,
           horizontalScrollbarSize: 8,

@@ -32,6 +32,7 @@ import { DocumentViewer } from './DocumentViewer.js';
 import type { MarkdownDocumentLinks } from '../../components/ChatMarkdown.js';
 import { KnowledgeView } from '../knowledge/KnowledgeView.js';
 import { cn } from '../../lib/utils.js';
+import { useDocumentRequest } from '../workspace-shell/openRequests.js';
 
 /** Matches the app's existing overlay idiom. */
 const OVERLAY = 'fixed inset-0 z-[100] flex flex-col bg-background';
@@ -187,6 +188,15 @@ export function RootDocumentsPanel({ workspaceId, workspacePath }: { workspaceId
     setSelected(name);
     setKnowledgeExpanded(false);
   }, []);
+
+  // A document named in the chat (a path the CLI printed) opens here.
+  const documentRequest = useDocumentRequest(workspaceId);
+  const handledDocumentRequest = useRef(0);
+  useEffect(() => {
+    if (!documentRequest || documentRequest.id === handledDocumentRequest.current) return;
+    handledDocumentRequest.current = documentRequest.id;
+    choose(documentRequest.request.name);
+  }, [documentRequest, choose]);
 
   const links = useMemo<MarkdownDocumentLinks | undefined>(() => selected ? {
     workspaceRoot: workspacePath,

@@ -28,6 +28,16 @@ test.use({ workspacesData: [feature], workspacesStatusData: {
   gutter: { id: 'gutter', branchName: 'gutter', changedFiles: 1, dirtyRepos: 1, syncStatus: 'up-to-date', runningServices: 0 },
 } });
 
+/** Opens the changed file and switches to the zero-worker engine, which is opt-in from the diff's options. */
+const switchToPlainPatch = async (page: import('@playwright/test').Page) => {
+  const code = page.getByRole('region', { name: 'Workspace code' });
+  await code.getByRole('treeitem', { name: /calc\.ts/ }).click();
+  await code.getByRole('toolbar', { name: 'Diff' }).getByRole('button', { name: 'More diff options' }).click();
+  const plain = page.getByRole('menuitemcheckbox', { name: 'Plain patch view' });
+  await plain.click();
+  await expect(page.getByTestId('fallback-diff')).toBeVisible();
+};
+
 /** Every rendered row, including deletions and file headers. */
 const gutterRows = (page: import('@playwright/test').Page) =>
   page.getByTestId('fallback-diff').locator(':scope > div');
@@ -39,14 +49,7 @@ test('the lightweight fallback diff reports real original and modified line numb
   await page.route('**/api/workspace/gutter/changes/symbols', route => route.fulfill(json({ symbols: [] })));
   await page.route('**/api/workspace/gutter/changes/diff?*', route => route.fulfill(json({ diff, fileContent: 'x\n', originalContent: 'y\n', symbols: [] })));
   await page.goto('/#/workspaces/gutter/changes');
-  await page.getByRole('button', { name: 'Expand All', exact: true }).click();
-  await page.getByRole('button', { name: /calc\.ts/ }).first().click();
-
-  // Switch to the zero-worker engine, which is opt-in from the toolbar.
-  const engine = page.getByTitle('Toggle between Monaco Diff Editor and Lightweight Fallback');
-  await expect(engine).toBeVisible();
-  await engine.click();
-  await expect(engine).toHaveText('Fallback');
+  await switchToPlainPatch(page);
 
   const rows = gutterRows(page);
   await expect(rows).toHaveCount(9);
@@ -78,9 +81,7 @@ test('the fallback gutter never falls back to a patch-array index', async ({ pag
   await page.route('**/api/workspace/gutter/changes/symbols', route => route.fulfill(json({ symbols: [] })));
   await page.route('**/api/workspace/gutter/changes/diff?*', route => route.fulfill(json({ diff, fileContent: 'x\n', originalContent: 'y\n', symbols: [] })));
   await page.goto('/#/workspaces/gutter/changes');
-  await page.getByRole('button', { name: 'Expand All', exact: true }).click();
-  await page.getByRole('button', { name: /calc\.ts/ }).first().click();
-  await page.getByTitle('Toggle between Monaco Diff Editor and Lightweight Fallback').click();
+  await switchToPlainPatch(page);
 
   const numbers = await gutterRows(page).evaluateAll(nodes => nodes.flatMap(node => ['data-orig-line', 'data-mod-line']
     .map(attribute => node.getAttribute(attribute) ?? '')

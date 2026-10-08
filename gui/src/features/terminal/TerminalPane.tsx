@@ -67,7 +67,7 @@ const paneStatusFor = (kind: PaneState['kind']): PaneStatus => {
   }
 };
 
-interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'>) => void; codeVisible?: boolean; inspectorControls?: ReactNode; inspectorExpandControl?: ReactNode; onStatusChange?: (status: PaneStatus) => void; onBackgroundOutput?: () => void; fillPromptRef?: { current: ((text: string) => boolean) | null };
+interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; consumeLaunch: (id: string) => void; onOpenFileReference?: (reference: Pick<FileReference, 'path' | 'line'> & { cwd?: string }) => void; inspectorControls?: ReactNode; onStatusChange?: (status: PaneStatus) => void; onBackgroundOutput?: () => void; fillPromptRef?: { current: ((text: string) => boolean) | null };
   /** The developer sent a line to an assistant (not a plain shell): their reply to whatever it asked. */
   onReply?: (target: string) => void;
   /** The terminal this pane shows, chosen by its session tab: null for none yet, undefined while the tab still looks.
@@ -85,7 +85,7 @@ interface Props { workspace: string; active: boolean; launch?: TerminalLaunch; c
   primary?: boolean;
   /** True while this pane starts or resumes a terminal, so the tabs do not give it a tab of its own meanwhile. */
   onBusyChange?: (busy: boolean) => void }
-export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenFileReference, codeVisible, inspectorControls, inspectorExpandControl, onStatusChange, onBackgroundOutput, fillPromptRef, onReply, boundTerminalId, claimed, onTerminalChange, onShowTerminal, sessionTabs, primary = true, onBusyChange }: Props) {
+export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenFileReference, inspectorControls, onStatusChange, onBackgroundOutput, fillPromptRef, onReply, boundTerminalId, claimed, onTerminalChange, onShowTerminal, sessionTabs, primary = true, onBusyChange }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const renderer = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -98,7 +98,6 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   // The saved conversations shown over an ended terminal. A pane with no terminal lists them under the tool buttons.
   const [showHistory, setShowHistory] = useState(false);
   const [terminal, setTerminal] = useState<TerminalInfo | null>(null);
-  useEffect(() => { if (codeVisible && terminal) setShowHistory(false); }, [codeVisible, terminal]);
   useEffect(() => { if (terminal) setShowHistory(false); }, [terminal]);
   const [paneState, setPaneState] = useState<PaneState>({ kind: 'connecting' });
   const [endedByUser, setEndedByUser] = useState(false);
@@ -138,6 +137,9 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
   const backgroundOutputRef = useRef(onBackgroundOutput);
   useEffect(() => { activeRef.current = active; }, [active]);
   useEffect(() => { openFileRef.current = onOpenFileReference; }, [onOpenFileReference]);
+  // Where the session runs, so a relative path it prints resolves from there. Read by the link providers.
+  const cwdRef = useRef<string | undefined>(undefined);
+  useEffect(() => { cwdRef.current = terminal?.cwd; }, [terminal]);
   useEffect(() => { statusChangeRef.current = onStatusChange; backgroundOutputRef.current = onBackgroundOutput; }, [onStatusChange, onBackgroundOutput]);
   const replyRef = useRef(onReply);
   useEffect(() => { replyRef.current = onReply; }, [onReply]);
@@ -205,7 +207,19 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
 
   useEffect(() => {
     if (!host.current) return;
-    const term = new Terminal({ cursorBlink: true, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, scrollback: 5000, allowProposedApi: false, theme: { background: '#111b18', foreground: '#e1e9e4', cursor: '#a3dbae' } });
+    const term = new Terminal({
+      cursorBlink: true, fontFamily: '"JetBrains Mono", monospace', fontSize: 13, scrollback: 5000, allowProposedApi: false,
+      theme: { background: '#111b18', foreground: '#e1e9e4', cursor: '#a3dbae' },
+      // Hyperlinks a CLI embeds in its output (OSC 8). Without a handler xterm asks for confirmation and
+      // opens a file:// link in a blank window, which shows nothing; files open in Code like printed paths.
+      linkHandler: {
+        allowNonHttpProtocols: true,
+        activate: (_event, uri) => {
+          if (/^https?:\/\//i.test(uri)) window.open(uri, '_blank', 'noopener,noreferrer');
+          else if (/^file:\/\//i.test(uri)) openFileRef.current?.({ path: uri, cwd: cwdRef.current });
+        },
+      },
+    });
     const sizing = new FitAddon(), searching = new SearchAddon();
     term.loadAddon(sizing); term.loadAddon(searching); term.open(host.current);
     const terminalHost = host.current;
@@ -306,7 +320,7 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       callback(findFileReferences(windowed.text).map(reference => ({
         text: reference.text,
         range: { start: windowed.positionAt(reference.start, false), end: windowed.positionAt(reference.end, true) },
-        activate: () => openFileRef.current?.({ path: reference.path, line: reference.line }),
+        activate: () => openFileRef.current?.({ path: reference.path, line: reference.line, cwd: cwdRef.current }),
       })));
     } });
     renderer.current = term; fit.current = sizing; search.current = searching;
@@ -574,7 +588,6 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       </span>}
       <span className="flex-1" />
       {inspectorControls}
-      {inspectorExpandControl}
       {terminal && <Menu open={paneMenuOpen} onOpenChange={setPaneMenuOpen}>
         <MenuTrigger aria-label="Pane options" className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground" title="Open terminals, usage and terminal tools">
           <MoreHorizontal className="size-3" />

@@ -12,7 +12,7 @@ export const SECTION_LABELS: Record<WorkspaceSection, string> = {
   documents: 'Documents',
   knowledge: 'Knowledge',
   skills: 'Skills',
-  changes: 'Changes',
+  changes: 'Code',
   sessions: 'Sessions',
   services: 'Services',
 };

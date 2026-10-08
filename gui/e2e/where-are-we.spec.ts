@@ -157,14 +157,24 @@ test('types the AI\'s suggestion into the prompt but never presses Enter', async
   await expect(strip(page)).toContainText('Press Enter to send it.');
 });
 
+/** The server's resolver: `repo/<path>` names a file in the repository `repo`. */
+const resolveCache = (page: import('@playwright/test').Page) => page.route('**/api/workspace/feature-x/files/resolve?*', (route) => {
+  const path = new URL(route.request().url()).searchParams.get('path') ?? '';
+  const file = path.replace(/^repo\//, '');
+  return route.fulfill({ json: { status: 'found', repoName: 'repo', repoPath: 'C:/repo', file } });
+});
+
 test('opens the file a suggestion points at', async ({ page }) => {
   const listing = { changes: [{ repoName: 'repo', repoPath: 'C:/repo', files: [{ file: 'src/cache.ts', type: 'modified', additions: 1, deletions: 0 }] }] };
   await page.route('**/api/workspace/feature-x/changes?include=all', (route) => route.fulfill({ json: listing }));
   await page.route('**/api/workspace/feature-x/changes', (route) => route.fulfill({ json: listing }));
   await page.route('**/api/workspace/feature-x/changes/diff?*', (route) => route.fulfill({ json: { diff: '', fileContent: 'export const cache = 1;\n', originalContent: '' } }));
+  await resolveCache(page);
   const chat = await openChat(page, { events: nextFrame('Cover the cache', { path: 'src/cache.ts', repo: 'repo', line: 1 }) });
   await strip(page).getByRole('button', { name: /^Next: Cover the cache/ }).click();
-  await expect(page.getByRole('region', { name: 'CLI Chat', exact: true }).getByRole('region', { name: 'Workspace code' })).toBeVisible();
+  // The file opens in Code beside the chat, not in a second panel inside it.
+  await expect(page.getByRole('region', { name: 'Workspace code' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'CLI Chat', exact: true }).getByRole('region', { name: 'Workspace code' })).toHaveCount(0);
   await expect.poll(() => chat.typed).toEqual(['Go ahead: Cover the cache']);
 });
 
@@ -177,11 +187,12 @@ test('opens what the AI shows as it arrives, but not what it showed before the c
     opened.push(new URL(route.request().url()).searchParams.get('file') ?? '');
     return route.fulfill({ json: { diff: '', fileContent: 'export const cache = 1;\n', originalContent: '' } });
   });
+  await resolveCache(page);
   const show = (id: string, timestamp: string, file: string) =>
     frame('screen', { event: { id, timestamp, harness: 'claude', event: 'show', payload: { view: 'file', path: file, repo: 'repo', line: 1 } } }, timestamp);
   const fresh = new Date(Date.now() + 60_000).toISOString();
   await openChat(page, { events: show('old', '2026-10-02T11:30:00.000Z', 'src/old.ts') + show('new', fresh, 'src/cache.ts') });
-  await expect(page.getByRole('region', { name: 'CLI Chat', exact: true }).getByRole('region', { name: 'Workspace code' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Workspace code' })).toBeVisible();
   await expect.poll(() => opened).toContain('src/cache.ts');
   expect(opened).not.toContain('src/old.ts');
 });

@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
-import { cloneElement, isValidElement, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ChevronRight, Folder, FolderOpen } from 'lucide-react';
+import { cn } from '../../lib/utils.js';
 
 export interface TreeFile {
   file: string;
@@ -237,13 +238,19 @@ export function getMatchingBranchPaths<T extends TreeFile>(
   return new Set(getAllDirectoryPaths(tree));
 }
 
-export interface VisibleTreeRow {
+export interface VisibleTreeRow<T extends TreeFile = TreeFile> {
   type: 'folder' | 'file';
   id: string;
   path: string;
   name: string;
   parentPath: string | null;
   isExpanded?: boolean;
+  /** Depth (1 for top-level rows), position among siblings and number of siblings, as ARIA states them. */
+  level: number;
+  posinset: number;
+  setsize: number;
+  /** The file a file row stands for. */
+  file?: T;
 }
 
 /**
@@ -253,43 +260,32 @@ export interface VisibleTreeRow {
 export function getVisibleTreeRows<T extends TreeFile>(
   root: TreeNode<T>,
   expandedPaths: Set<string>
-): VisibleTreeRow[] {
-  const result: VisibleTreeRow[] = [];
+): VisibleTreeRow<T>[] {
+  const result: VisibleTreeRow<T>[] = [];
 
-  const walk = (node: TreeNode<T>, parentPath: string | null) => {
+  const walk = (node: TreeNode<T>, parentPath: string | null, level: number) => {
+    const setsize = node.directories.length + node.files.length;
+    let posinset = 0;
     for (const dir of node.directories) {
       const isExpanded = expandedPaths.has(dir.path);
-      result.push({
-        type: 'folder',
-        id: `dir:${dir.path}`,
-        path: dir.path,
-        name: dir.name,
-        parentPath,
-        isExpanded,
-      });
-      if (isExpanded) {
-        walk(dir, dir.path);
-      }
+      posinset += 1;
+      result.push({ type: 'folder', id: `dir:${dir.path}`, path: dir.path, name: dir.name, parentPath, isExpanded, level, posinset, setsize });
+      if (isExpanded) walk(dir, dir.path, level + 1);
     }
     for (const file of node.files) {
       const norm = normalizePath(file.file);
       const fileName = norm.split('/').filter(Boolean).at(-1) ?? norm;
-      result.push({
-        type: 'file',
-        id: `file:${norm}`,
-        path: norm,
-        name: fileName,
-        parentPath,
-      });
+      posinset += 1;
+      result.push({ type: 'file', id: `file:${norm}`, path: norm, name: fileName, parentPath, level, posinset, setsize, file });
     }
   };
 
-  walk(root, null);
+  walk(root, null, 1);
   return result;
 }
 
 export type TreeNavAction =
-  | { type: 'focus'; targetRow: VisibleTreeRow }
+  | { type: 'focus'; targetRow: VisibleTreeRow<TreeFile> }
   | { type: 'toggle'; path: string }
   | { type: 'activate'; path: string }
   | { type: 'none' };
@@ -300,8 +296,8 @@ export type TreeNavAction =
  */
 export function computeTreeKeyNavigation(
   key: string,
-  currentRow: VisibleTreeRow | undefined,
-  visibleRows: readonly VisibleTreeRow[]
+  currentRow: VisibleTreeRow<TreeFile> | undefined,
+  visibleRows: readonly VisibleTreeRow<TreeFile>[]
 ): TreeNavAction {
   if (!currentRow || visibleRows.length === 0) {
     return { type: 'none' };
@@ -367,460 +363,212 @@ export function computeTreeKeyNavigation(
   }
 }
 
-function findFolderSummary(container: HTMLElement | null, path: string): HTMLElement | null {
-  if (!container) return null;
-  const summaries = container.querySelectorAll<HTMLElement>('summary[data-path]');
-  for (const s of summaries) {
-    if (s.dataset.path === path) return s;
-  }
-  return null;
-}
-
-function findFileTarget(container: HTMLElement | null, normalizedPath: string): HTMLElement | null {
-  if (!container) return null;
-  const items = container.querySelectorAll<HTMLElement>('[data-file-path]');
-  for (const item of items) {
-    if (item.dataset.filePath === normalizedPath) {
-      return item.querySelector<HTMLElement>('button, [data-tree-row="file"], [role="button"]') ?? item;
-    }
-  }
-  return null;
-}
+/** How long typed letters keep adding to one type-ahead search, as in a native tree. */
+const TYPE_AHEAD_MS = 600;
 
 export interface FileTreeProps<T extends TreeFile> {
-  files: T[];
-  renderFile: (file: T, meta?: { isSelected: boolean; tabIndex: number }) => ReactNode;
+  files: readonly T[];
+  /** The tree of `files`, when the caller already built it (it is the same as `buildCompactedTree(files, { compact })`). */
+  root?: TreeNode<T>;
   label: string;
+  /** What a file row shows. The tree owns focus, selection and activation; this only draws the row. */
+  renderFile: (file: T, meta: { selected: boolean }) => ReactNode;
+  /** A file row was clicked, or chosen with Enter or Space. */
+  onActivateFile?: (file: T) => void;
+  selectedPath?: string;
+  /** Opens the folders above this path and scrolls it into view, once per `revealKey`. */
   revealPath?: string;
   revealKey?: number;
-  selectedPath?: string;
   compact?: boolean;
+  /** Uncontrolled only: whether folders start open. Folders that appear later follow the same default. */
   defaultExpanded?: boolean;
   expandedPaths?: Set<string>;
   onExpandedPathsChange?: (paths: Set<string>) => void;
-  onTogglePath?: (path: string, isOpen: boolean) => void;
-  searchQuery?: string;
 }
 
-/** Keep the original Git path intact: the hierarchy is only a presentation. */
+/**
+ * A WAI-ARIA tree of files. Rows are rendered flat, each stating its level, so the list stays
+ * cheap and keyboard order is plain list order. Focus sits on the row itself (one tab stop for
+ * the whole tree, arrows move it, Enter or Space activates, letters jump to a matching name), and
+ * the row content is drawn by the caller without controls of its own.
+ *
+ * Keep the original Git path intact: the hierarchy is only a presentation.
+ */
 export function FileTree<T extends TreeFile>({
   files,
-  renderFile,
+  root: prebuiltRoot,
   label,
+  renderFile,
+  onActivateFile,
+  selectedPath,
   revealPath,
   revealKey,
-  selectedPath,
   compact = true,
   defaultExpanded = true,
   expandedPaths: controlledExpandedPaths,
   onExpandedPathsChange,
-  onTogglePath,
-  searchQuery,
 }: FileTreeProps<T>) {
-  const host = useRef<HTMLElement>(null);
-  const effectiveFiles = useMemo(() => {
-    return searchQuery && searchQuery.trim() ? filterTreeFiles(files, searchQuery) : files;
-  }, [files, searchQuery]);
-  const root = useMemo(() => buildCompactedTree(effectiveFiles, { compact }), [effectiveFiles, compact]);
+  const list = useRef<HTMLUListElement>(null);
+  const builtRoot = useMemo(() => (prebuiltRoot ? null : buildCompactedTree(files, { compact })), [prebuiltRoot, files, compact]);
+  const root = prebuiltRoot ?? builtRoot!;
   const allPaths = useMemo(() => getAllDirectoryPaths(root), [root]);
+  const target = revealPath ?? selectedPath;
 
-  // Uncontrolled state when expandedPaths prop is not provided
   const [internalExpandedPaths, setInternalExpandedPaths] = useState<Set<string>>(() => {
-    if (searchQuery && searchQuery.trim()) return new Set(allPaths);
     const initial = defaultExpanded ? new Set(allPaths) : new Set<string>();
-    const initialTarget = revealPath ?? selectedPath;
-    if (initialTarget) {
-      for (const a of getAncestorPaths(root, initialTarget)) {
-        initial.add(a);
-      }
-    }
+    if (target) for (const ancestor of getAncestorPaths(root, target)) initial.add(ancestor);
     return initial;
   });
-
-  // Auto-expand all matching branches when search query is entered in uncontrolled mode
+  // Uncontrolled: a folder that appears later follows the default; one the user toggled keeps its state.
+  const knownPaths = useRef(new Set(allPaths));
   useEffect(() => {
-    if (!searchQuery || !searchQuery.trim() || controlledExpandedPaths !== undefined) return;
-    setInternalExpandedPaths(new Set(allPaths));
-  }, [searchQuery, allPaths, controlledExpandedPaths]);
-
-  // Track changes to allPaths when in defaultExpanded uncontrolled mode
-  const prevPathsRef = useRef(allPaths.join('|'));
-  useEffect(() => {
-    const key = allPaths.join('|');
-    if (key !== prevPathsRef.current) {
-      const prevKey = prevPathsRef.current;
-      prevPathsRef.current = key;
-      if (defaultExpanded && controlledExpandedPaths === undefined) {
-        const oldPaths = new Set(prevKey.split('|').filter(Boolean));
-        setInternalExpandedPaths(prev => {
-          const next = new Set(prev);
-          for (const p of allPaths) {
-            // Only add brand-new directories; do not re-expand folders the user manually collapsed
-            if (!oldPaths.has(p)) {
-              next.add(p);
-            }
-          }
-          // Remove directories that no longer exist in the tree
-          const allSet = new Set(allPaths);
-          for (const p of next) {
-            if (!allSet.has(p)) {
-              next.delete(p);
-            }
-          }
-          return next;
-        });
-      }
+    const added = allPaths.filter((path) => !knownPaths.current.has(path));
+    knownPaths.current = new Set(allPaths);
+    if (controlledExpandedPaths === undefined && defaultExpanded && added.length > 0) {
+      setInternalExpandedPaths((previous) => new Set([...previous, ...added]));
     }
-  }, [allPaths, defaultExpanded, controlledExpandedPaths]);
+  }, [allPaths, controlledExpandedPaths, defaultExpanded]);
 
-  const isControlled = controlledExpandedPaths !== undefined;
-  const currentExpandedPaths = isControlled ? controlledExpandedPaths : internalExpandedPaths;
+  const expandedPaths = controlledExpandedPaths ?? internalExpandedPaths;
+  const setExpandedPaths = useCallback((next: Set<string>) => {
+    if (controlledExpandedPaths === undefined) setInternalExpandedPaths(next);
+    onExpandedPathsChange?.(next);
+  }, [controlledExpandedPaths, onExpandedPathsChange]);
 
-  const onExpandedPathsChangeRef = useRef(onExpandedPathsChange);
-  const controlledPathsRef = useRef(controlledExpandedPaths);
-
-  useEffect(() => {
-    onExpandedPathsChangeRef.current = onExpandedPathsChange;
-    controlledPathsRef.current = controlledExpandedPaths;
-  });
-
-  const setExpandedPaths = useCallback(
-    (updater: (prev: Set<string>) => Set<string>) => {
-      if (controlledPathsRef.current !== undefined) {
-        const current = controlledPathsRef.current;
-        const next = updater(current);
-        if (next !== current && (next.size !== current.size || [...next].some(p => !current.has(p)))) {
-          onExpandedPathsChangeRef.current?.(next);
-        }
-      } else {
-        setInternalExpandedPaths(prev => {
-          const next = updater(prev);
-          if (next !== prev && (next.size !== prev.size || [...next].some(p => !prev.has(p)))) {
-            onExpandedPathsChangeRef.current?.(next);
-          }
-          return next;
-        });
-      }
-    },
-    []
-  );
-
-  const togglePath = useCallback(
-    (path: string) => {
-      const currentlyOpen = currentExpandedPaths.has(path);
-      const nextOpen = !currentlyOpen;
-      setExpandedPaths(prev => {
-        const next = new Set(prev);
-        if (nextOpen) {
-          next.add(path);
-        } else {
-          next.delete(path);
-        }
-        return next;
-      });
-      onTogglePath?.(path, nextOpen);
-    },
-    [currentExpandedPaths, setExpandedPaths, onTogglePath]
-  );
-
-  // Auto-expand parent/ancestor folders when a file is revealed or selected
-  const targetPath = revealPath ?? selectedPath;
-
-  useEffect(() => {
-    if (!targetPath) return;
-    const ancestors = getAncestorPaths(root, targetPath);
-    if (ancestors.length > 0) {
-      setExpandedPaths(prev => {
-        let changed = false;
-        const next = new Set(prev);
-        for (const p of ancestors) {
-          if (!next.has(p)) {
-            next.add(p);
-            changed = true;
-          }
-        }
-        return changed ? next : prev;
-      });
-    }
-  }, [targetPath, revealKey, root, setExpandedPaths]);
-
-  // Smoothly scroll the selected/revealed file button into view in the sidebar
-  useEffect(() => {
-    if (!targetPath) return;
-    const normalized = normalizePath(targetPath);
-    const items = host.current?.querySelectorAll<HTMLElement>('[data-file-path]');
-    for (const item of items ?? []) {
-      if (item.dataset.filePath === normalized) {
-        const target = item.querySelector<HTMLElement>('button, [role="button"]') ?? item;
-        if (typeof target.scrollIntoView === 'function') {
-          target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        } else if (typeof item.scrollIntoView === 'function') {
-          item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        }
-        break;
-      }
-    }
-  }, [targetPath, revealKey, currentExpandedPaths]);
-
-  // Track focused row for roving tabindex
-  const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!targetPath) return;
-    const norm = normalizePath(targetPath);
-    const isDir = allPaths.includes(norm);
-    setFocusedRowId(isDir ? `dir:${norm}` : `file:${norm}`);
-  }, [targetPath, revealKey, allPaths]);
-
-  const visibleRows = useMemo(
-    () => getVisibleTreeRows(root, currentExpandedPaths),
-    [root, currentExpandedPaths]
-  );
-
-  const visibleRowIds = useMemo(() => new Set(visibleRows.map(r => r.id)), [visibleRows]);
-  const effectiveSelectedPath = selectedPath ?? revealPath;
-
-  const activeRowId = useMemo(() => {
-    if (focusedRowId && visibleRowIds.has(focusedRowId)) {
-      return focusedRowId;
-    }
-    if (effectiveSelectedPath) {
-      const selId = `file:${normalizePath(effectiveSelectedPath)}`;
-      if (visibleRowIds.has(selId)) {
-        return selId;
-      }
-    }
-    return visibleRows[0]?.id ?? null;
-  }, [focusedRowId, visibleRowIds, effectiveSelectedPath, visibleRows]);
-
-  const focusRow = useCallback(
-    (row: VisibleTreeRow) => {
-      setFocusedRowId(row.id);
-      if (row.type === 'folder') {
-        const summaryEl = findFolderSummary(host.current, row.path);
-        summaryEl?.focus();
-      } else {
-        const fileTarget = findFileTarget(host.current, row.path);
-        fileTarget?.focus();
-      }
-    },
-    []
-  );
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.defaultPrevented) return;
-      if (e.altKey || e.ctrlKey || e.metaKey) return;
-
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
-        return;
-      }
-
-      const key = e.key;
-      if (!['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft', 'Home', 'End', 'Enter', ' '].includes(key)) {
-        return;
-      }
-
-      let currentIndex = visibleRows.findIndex(r => r.id === activeRowId);
-      const activeEl = document.activeElement as HTMLElement | null;
-      if (activeEl) {
-        const summary = activeEl.closest('summary[data-path]');
-        if (summary) {
-          const p = summary.getAttribute('data-path');
-          const idx = visibleRows.findIndex(r => r.id === `dir:${p}`);
-          if (idx !== -1) currentIndex = idx;
-        } else {
-          const fileLi = activeEl.closest('[data-file-path]');
-          if (fileLi) {
-            const p = fileLi.getAttribute('data-file-path');
-            const idx = visibleRows.findIndex(r => r.id === `file:${p}`);
-            if (idx !== -1) currentIndex = idx;
-          }
-        }
-      }
-
-      if (currentIndex === -1 && visibleRows.length > 0) {
-        currentIndex = 0;
-      }
-      const currentRow = visibleRows[currentIndex];
-      if (!currentRow) return;
-
-      const action = computeTreeKeyNavigation(key, currentRow, visibleRows);
-      if (action.type !== 'none') {
-        e.preventDefault();
-      }
-
-      if (action.type === 'focus') {
-        focusRow(action.targetRow);
-      } else if (action.type === 'toggle') {
-        setFocusedRowId(currentRow.id);
-        togglePath(action.path);
-      } else if (action.type === 'activate') {
-        setFocusedRowId(currentRow.id);
-        const fileTarget = findFileTarget(host.current, action.path);
-        if (fileTarget && e.target !== fileTarget && !fileTarget.contains(e.target as Node)) {
-          fileTarget.click();
-        }
-      }
-    },
-    [visibleRows, activeRowId, focusRow, togglePath]
-  );
-
-  const renderFileRow = (
-    file: T,
-    meta: { isSelected: boolean; tabIndex: number }
-  ) => {
-    const rendered = renderFile(file, meta);
-    const normalizedFilePath = normalizePath(file.file);
-    if (isValidElement(rendered)) {
-      const props = rendered.props as Record<string, any>;
-      return cloneElement(rendered as React.ReactElement<any>, {
-        tabIndex: meta.tabIndex,
-        'data-file-path': normalizedFilePath,
-        'data-tree-row': 'file',
-        ...(props['aria-selected'] === undefined
-          ? { 'aria-selected': meta.isSelected }
-          : {}),
-        onFocus: (e: React.FocusEvent) => {
-          props.onFocus?.(e);
-          setFocusedRowId(`file:${normalizedFilePath}`);
-        },
-      });
-    }
-    return rendered;
+  const toggle = (path: string) => {
+    const next = new Set(expandedPaths);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    setExpandedPaths(next);
   };
 
-  const renderTree = (node: TreeNode<T>, isRoot: boolean): ReactNode => {
-    const content = (
-      <>
-        {node.directories.map((child) => {
-          const isExpanded = currentExpandedPaths.has(child.path);
-          const isRowActive = activeRowId === `dir:${child.path}`;
-          const folderTabIndex = isRowActive ? 0 : -1;
+  const rows = useMemo(() => getVisibleTreeRows(root, expandedPaths), [root, expandedPaths]);
+  const rowIds = useMemo(() => new Set(rows.map((row) => row.id)), [rows]);
+  const selectedId = selectedPath ? `file:${normalizePath(selectedPath)}` : null;
 
-          return (
-            <li
-              key={`dir:${child.path}`}
-              role="treeitem"
-              aria-expanded={isExpanded}
-              tabIndex={folderTabIndex}
-              className="tree-row-wrapper min-w-0 [content-visibility:auto] [contain-intrinsic-size:auto_28px]"
-              style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 28px' }}
-              onFocus={(e) => {
-                if (e.target === e.currentTarget) {
-                  if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget as Node)) {
-                    return;
-                  }
-                  const summary = findFolderSummary(e.currentTarget, child.path);
-                  summary?.focus();
-                }
-              }}
-            >
-              <details
-                open={isExpanded}
-                data-path={child.path}
-                className="min-w-0 group/dir"
-              >
-                {/* A native disclosure triangle plus a closed/open folder pair reads as
-                    a tree far faster than a single static folder glyph. */}
-                <summary
-                  data-tree-row="folder"
-                  data-path={child.path}
-                  tabIndex={folderTabIndex}
-                  aria-expanded={isExpanded}
-                  className="flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs hover:bg-accent focus-visible:outline focus-visible:outline-primary select-none"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    togglePath(child.path);
-                    setFocusedRowId(`dir:${child.path}`);
-                  }}
-                  onFocus={() => {
-                    setFocusedRowId(`dir:${child.path}`);
-                  }}
-                >
-                  <ChevronRight
-                    className="size-3 shrink-0 text-muted-foreground transition-transform group-open/dir:rotate-90"
-                    aria-hidden="true"
-                  />
-                  <Folder
-                    className="size-3.5 shrink-0 text-warning-foreground/80 group-open/dir:hidden"
-                    aria-hidden="true"
-                  />
-                  <FolderOpen
-                    className="hidden size-3.5 shrink-0 text-warning-foreground group-open/dir:block"
-                    aria-hidden="true"
-                  />
-                  <span className="truncate">{child.name}</span>
-                </summary>
-                {isExpanded && (
-                  <div className="ml-2 border-l border-border pl-1.5">
-                    {renderTree(child, false)}
-                  </div>
-                )}
-              </details>
-            </li>
-          );
-        })}
-        {node.files.map((file) => {
-          const normalizedFilePath = normalizePath(file.file);
-          const isSelected = effectiveSelectedPath !== undefined && normalizedFilePath === normalizePath(effectiveSelectedPath);
-          const isRowActive = activeRowId === `file:${normalizedFilePath}`;
-          const fileTabIndex = isRowActive ? 0 : -1;
+  // A reveal opens the folders above its file and scrolls the file into view, once. A refresh of the
+  // listing or a folder the user toggles never scrolls or reopens anything.
+  const pendingReveal = useRef<{ id: string; path: string; expanded: boolean } | null>(null);
+  useEffect(() => {
+    pendingReveal.current = target ? { id: `file:${normalizePath(target)}`, path: target, expanded: false } : null;
+  }, [target, revealKey]);
+  useEffect(() => {
+    const pending = pendingReveal.current;
+    if (!pending) return;
+    if (rowIds.has(pending.id)) {
+      pendingReveal.current = null;
+      rowElement(list.current, pending.id)?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (pending.expanded) return;
+    const missing = getAncestorPaths(root, pending.path).filter((path) => !expandedPaths.has(path));
+    if (missing.length === 0) return;
+    // Asked once per reveal: a parent that keeps its own folder state may decline, and must not be asked forever.
+    pending.expanded = true;
+    setExpandedPaths(new Set([...expandedPaths, ...missing]));
+  }, [rowIds, root, expandedPaths, setExpandedPaths]);
 
-          return (
-            <li
-              key={`file:${file.file}`}
-              role="treeitem"
-              aria-selected={isSelected}
-              tabIndex={fileTabIndex}
-              data-file-path={normalizedFilePath}
-              className="tree-row-wrapper min-w-0 [content-visibility:auto] [contain-intrinsic-size:auto_28px]"
-              style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 28px' }}
-              onFocus={(e) => {
-                if (e.target === e.currentTarget) {
-                  if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget as Node)) {
-                    return;
-                  }
-                  const target = findFileTarget(e.currentTarget, normalizedFilePath);
-                  if (target && target !== e.currentTarget) {
-                    target.focus();
-                  }
-                }
-              }}
-            >
-              {renderFileRow(file, { isSelected, tabIndex: fileTabIndex })}
-            </li>
-          );
-        })}
-      </>
-    );
+  // Roving tab stop: the row last focused, else the selected file, else the first row.
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const activeId = focusedId && rowIds.has(focusedId)
+    ? focusedId
+    : selectedId && rowIds.has(selectedId) ? selectedId : rows[0]?.id ?? null;
 
-    if (isRoot) {
-      return (
-        <ul
-          role="tree"
-          aria-label={label}
-          className="min-w-0 space-y-0.5 outline-none"
-          tabIndex={-1}
-          onKeyDown={handleKeyDown}
-        >
-          {content}
-        </ul>
-      );
+  const focusRow = (row: VisibleTreeRow<T>) => {
+    setFocusedId(row.id);
+    rowElement(list.current, row.id)?.focus();
+  };
+
+  const activate = (row: VisibleTreeRow<T>) => {
+    if (row.type === 'folder') toggle(row.path);
+    else if (row.file) onActivateFile?.(row.file);
+  };
+
+  const typeAhead = useRef<{ text: string; at: number }>({ text: '', at: 0 });
+  const onKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+    // Only keys pressed on a row of this tree; anything inside a row keeps its own keys.
+    const element = event.target as HTMLElement;
+    if (element.getAttribute('role') !== 'treeitem' || element.closest('[role="tree"]') !== list.current) return;
+    const current = rows.find((row) => row.id === element.dataset.rowId);
+    if (!current) return;
+
+    // `/` is left alone: it is the filter's shortcut.
+    if (event.key.length === 1 && /\S/.test(event.key) && event.key !== '/') {
+      const now = Date.now();
+      const text = (now - typeAhead.current.at < TYPE_AHEAD_MS ? typeAhead.current.text : '') + event.key.toLowerCase();
+      typeAhead.current = { text, at: now };
+      const start = rows.indexOf(current);
+      const ordered = [...rows.slice(start + (text.length === 1 ? 1 : 0)), ...rows.slice(0, start + (text.length === 1 ? 1 : 0))];
+      const match = ordered.find((row) => row.name.toLowerCase().startsWith(text));
+      if (match) {
+        event.preventDefault();
+        focusRow(match);
+      }
+      return;
     }
 
-    return (
-      <ul role="group" className="min-w-0 space-y-0.5">
-        {content}
-      </ul>
-    );
+    const action = computeTreeKeyNavigation(event.key, current, rows);
+    if (action.type === 'none') return;
+    event.preventDefault();
+    if (action.type === 'focus') focusRow(action.targetRow as VisibleTreeRow<T>);
+    else if (action.type === 'toggle') toggle(action.path);
+    else activate(current);
   };
 
   return (
-    <nav ref={host} aria-label={label}>
-      {renderTree(root, true)}
-    </nav>
+    <ul ref={list} role="tree" aria-label={label} className="min-w-0" onKeyDown={onKeyDown}>
+      {rows.map((row) => {
+        const selected = row.id === selectedId;
+        return (
+          <li
+            key={row.id}
+            role="treeitem"
+            data-row-id={row.id}
+            data-tree-row={row.type}
+            data-path={row.type === 'folder' ? row.path : undefined}
+            data-file-path={row.type === 'file' ? row.path : undefined}
+            aria-level={row.level}
+            aria-posinset={row.posinset}
+            aria-setsize={row.setsize}
+            aria-expanded={row.type === 'folder' ? Boolean(row.isExpanded) : undefined}
+            aria-selected={row.type === 'file' ? selected : undefined}
+            tabIndex={row.id === activeId ? 0 : -1}
+            title={row.type === 'folder' ? row.path : undefined}
+            onFocus={() => setFocusedId(row.id)}
+            onClick={() => activate(row)}
+            className={cn(
+              'tree-row flex min-w-0 cursor-pointer select-none items-stretch rounded pr-1 text-xs outline-none',
+              'hover:bg-accent focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary',
+              selected && 'bg-accent font-medium text-foreground',
+            )}
+          >
+            {/* One guide per level above the row: the tree reads as a tree at 12px per level. */}
+            {Array.from({ length: row.level - 1 }, (_, index) => (
+              <span key={index} aria-hidden="true" className="ml-[9px] w-[3px] shrink-0 border-l border-border/70" />
+            ))}
+            {row.type === 'folder' ? (
+              <span className="flex min-w-0 flex-1 items-center gap-1 px-1.5 py-1">
+                <ChevronRight className={cn('size-3 shrink-0 text-muted-foreground transition-transform', row.isExpanded && 'rotate-90')} aria-hidden="true" />
+                {row.isExpanded
+                  ? <FolderOpen className="size-3.5 shrink-0 text-warning-foreground" aria-hidden="true" />
+                  : <Folder className="size-3.5 shrink-0 text-warning-foreground/80" aria-hidden="true" />}
+                <span className="truncate">{row.name}</span>
+              </span>
+            ) : (
+              <span className="flex min-w-0 flex-1 items-center">{renderFile(row.file!, { selected })}</span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
+function rowElement(list: HTMLElement | null, id: string): HTMLElement | null {
+  if (!list) return null;
+  for (const element of list.querySelectorAll<HTMLElement>('[role="treeitem"]')) {
+    if (element.dataset.rowId === id) return element;
+  }
+  return null;
+}
