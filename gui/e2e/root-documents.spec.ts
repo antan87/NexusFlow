@@ -105,6 +105,86 @@ test('maximizes a document inside the app borders and restores focus on Escape',
   await expect(page.getByTitle('Preview of page.html')).toBeVisible();
 });
 
+test('fullscreen of a document covers the chat dock and viewport without chat overlapping', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('contextspace_chat_layout_v1', JSON.stringify({ hidden: false, percent: 50 }));
+    localStorage.setItem('contextspace_floating_chat_state_v1', JSON.stringify({
+      openTabs: ['demo'],
+      activeTab: 'demo',
+      splitTab: null,
+      splitRatio: 50,
+      modes: { demo: 'cli' },
+      harnesses: {},
+      terminalLaunches: {},
+      drafts: {},
+    }));
+  });
+
+  const documents = [{ name: 'page.html', kind: 'html', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' }];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => route.fulfill({
+    json: { name: 'page.html', kind: 'html', content: '<h1>Rendered HTML</h1><style>h1{color:rgb(1,2,3)}</style>' },
+  }));
+
+  await page.goto('/#/workspaces/demo/documents');
+  await page.getByRole('button', { name: /page.html/ }).click();
+
+  const chatDock = page.getByRole('region', { name: 'CLI Chat' });
+  await expect(chatDock).toBeVisible();
+
+  const expand = page.getByRole('button', { name: 'Expand document' });
+  await expand.click();
+
+  const overlay = page.getByTestId('document-viewer-expanded');
+  await expect(overlay).toBeVisible();
+
+  const viewport = page.viewportSize()!;
+  const overlayBox = await overlay.boundingBox();
+  expect(overlayBox!.x).toBe(0);
+  expect(overlayBox!.y).toBe(0);
+  expect(overlayBox!.width).toBe(viewport.width);
+  expect(overlayBox!.height).toBe(viewport.height);
+
+  const isCoveringChat = await page.evaluate(() => {
+    const el = document.elementFromPoint(100, 200);
+    const overlayEl = document.querySelector('[data-testid="document-viewer-expanded"]');
+    return overlayEl !== null && (el === overlayEl || overlayEl.contains(el));
+  });
+  expect(isCoveringChat).toBe(true);
+
+  await page.keyboard.press('Escape');
+  await expect(overlay).toBeHidden();
+  await expect(chatDock).toBeVisible();
+});
+
+test('fullscreen and close controls for knowledge view in the documents tab', async ({ page }) => {
+  const documents = [{ name: 'contextspace-knowledge.md', kind: 'markdown', size: 2048, modifiedAt: '2026-10-04T10:00:00Z' }];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => route.fulfill({
+    json: {
+      name: 'contextspace-knowledge.md',
+      kind: 'markdown',
+      content: '# Knowledge\n\n## Decisions\n\n### 2026-10-01 — test\n**Decision:** use portal\n',
+    },
+  }));
+  await page.goto('/#/workspaces/demo/documents');
+  await page.getByRole('button', { name: /^Knowledge/ }).click();
+
+  const expandKnowledge = page.getByRole('button', { name: 'Expand knowledge' });
+  await expect(expandKnowledge).toBeVisible();
+  await expandKnowledge.click();
+
+  const overlay = page.getByTestId('knowledge-expanded');
+  await expect(overlay).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(overlay).toBeHidden();
+
+  await page.getByRole('button', { name: 'Close document' }).click();
+  await expect(page.getByText('Select a document to open it here.')).toBeVisible();
+});
+
 /**
  * Deliberately a full document with a real <head>, because that is what an AI writes. DOMPurify
  * returns only the <body>, so head assets are hoisted by the viewer rather than sanitized in place;
@@ -339,3 +419,183 @@ test('links inside a document never leave the app', async ({ page }) => {
   expect(appUrl().pathname).toBe('/');
   expect(await page.evaluate(() => (window as unknown as { unsafe?: boolean }).unsafe)).toBeUndefined();
 });
+
+test('navigates folders, previews nested documents, and returns via breadcrumbs and documents list button', async ({ page }) => {
+  const rootDocs = [
+    { name: 'root-readme.md', kind: 'markdown', size: 100, modifiedAt: '2026-09-22T00:00:00.000Z' },
+  ];
+  const docsFolderFiles = [
+    { name: 'docs/architecture.md', kind: 'markdown', size: 250, modifiedAt: '2026-09-22T00:00:00.000Z' },
+  ];
+
+  await page.route('**/api/workspace/demo/documents*', (route) => {
+    const url = new URL(route.request().url());
+    const folder = url.searchParams.get('folder');
+    const recursive = url.searchParams.get('recursive');
+    if (recursive === '1') {
+      return route.fulfill({
+        json: {
+          documents: [...rootDocs, ...docsFolderFiles],
+          folders: ['docs'],
+        },
+      });
+    }
+    if (folder === 'docs') {
+      return route.fulfill({
+        json: {
+          documents: docsFolderFiles,
+          folders: [],
+        },
+      });
+    }
+    return route.fulfill({
+      json: {
+        documents: rootDocs,
+        folders: ['docs'],
+      },
+    });
+  });
+
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => {
+    const name = new URL(route.request().url()).searchParams.get('name');
+    if (name === 'docs/architecture.md') {
+      return route.fulfill({
+        json: { name: 'docs/architecture.md', kind: 'markdown', content: '# Architecture Overview\n\nModular design.' },
+      });
+    }
+    return route.fulfill({
+      json: { name: 'root-readme.md', kind: 'markdown', content: '# Root Readme' },
+    });
+  });
+
+  await page.goto('/#/workspaces/demo/documents');
+  await expect(page.getByRole('heading', { name: 'Folders' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'docs' })).toBeVisible();
+
+  // Click on the folder to navigate into it
+  await page.getByRole('button', { name: 'docs' }).click();
+
+  // Breadcrumbs show Root / docs
+  await expect(page.getByRole('button', { name: 'Root' })).toBeVisible();
+  await expect(page.getByText('docs', { exact: true })).toBeVisible();
+
+  // Documents inside docs/ are listed
+  await expect(page.getByRole('button', { name: /architecture.md/ })).toBeVisible();
+  await page.getByRole('button', { name: /architecture.md/ }).click();
+
+  // Document preview opens
+  const article = page.getByRole('article', { name: 'Document preview' });
+  await expect(article.getByRole('heading', { name: 'Architecture Overview' })).toBeVisible();
+  await expect(article.getByText('in docs')).toBeVisible();
+
+  // Documents list button returns to the list view
+  await article.getByRole('button', { name: 'Documents list' }).click();
+  await expect(page.getByText('Select a document to open it here.')).toBeVisible();
+
+  // Breadcrumb Root button returns to top-level folder
+  await page.getByRole('button', { name: 'Root' }).click();
+  await expect(page.getByRole('button', { name: /root-readme.md/ })).toBeVisible();
+});
+
+test('beside the chat, opening a document defaults to dedicated reader with quick-switch and split view toggle', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('contextspace_chat_layout_v1', JSON.stringify({ hidden: false, percent: 50 }));
+  });
+
+  const documents = [
+    { name: 'findings.md', kind: 'markdown', size: 100, modifiedAt: '2026-09-22T00:00:00.000Z' },
+    { name: 'summary.md', kind: 'markdown', size: 200, modifiedAt: '2026-09-22T00:00:00.000Z' },
+    { name: 'report.html', kind: 'html', size: 300, modifiedAt: '2026-09-22T00:00:00.000Z' },
+  ];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents, folders: [] } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => {
+    const name = new URL(route.request().url()).searchParams.get('name');
+    if (name === 'findings.md') return route.fulfill({ json: { name: 'findings.md', kind: 'markdown', content: '# Findings content' } });
+    if (name === 'summary.md') return route.fulfill({ json: { name: 'summary.md', kind: 'markdown', content: '# Summary content' } });
+    return route.fulfill({ json: { name: 'report.html', kind: 'html', content: '<h1>Report</h1>' } });
+  });
+
+  await page.goto('/#/workspaces/demo/documents');
+  const catalogList = page.getByRole('complementary', { name: 'Documents to open' });
+  await expect(catalogList).toBeVisible();
+
+  // 1. Open a document: defaults to dedicated reader
+  await page.getByRole('button', { name: /findings.md/ }).click();
+  const article = page.getByRole('article', { name: 'Document preview' });
+  await expect(article).toBeVisible();
+  await expect(article.getByRole('heading', { name: 'Findings content' })).toBeVisible();
+
+  // The catalog list is NOT stacked above it (it is hidden in dedicated reader mode)
+  await expect(catalogList).toBeHidden();
+
+  // 2. Header controls: All documents, quick-switch, split view
+  await expect(article.getByRole('button', { name: 'Documents list' })).toBeVisible();
+  const splitBtn = article.getByRole('button', { name: 'Split view' });
+  await expect(splitBtn).toBeVisible();
+
+  const prevBtn = article.getByRole('button', { name: 'Previous document' });
+  const nextBtn = article.getByRole('button', { name: 'Next document' });
+  const docSelect = article.getByLabel('Switch document');
+  await expect(prevBtn).toBeVisible();
+  await expect(nextBtn).toBeVisible();
+  await expect(docSelect).toBeVisible();
+
+  // 3. Quick-switch: click next document
+  await nextBtn.click();
+  await expect(article.getByRole('heading', { name: 'Summary content' })).toBeVisible();
+
+  // Or select via dropdown
+  await docSelect.selectOption('report.html');
+  await expect(page.getByTitle('Preview of report.html')).toBeVisible();
+
+  // 4. Toggle Split view
+  await splitBtn.click();
+  // Now list is visible side-by-side (never stacked vertically)
+  await expect(catalogList).toBeVisible();
+  const [listBox, articleBox] = [await catalogList.boundingBox(), await article.boundingBox()];
+  // Side-by-side: article is to the right of catalogList, not underneath
+  expect(articleBox!.x).toBeGreaterThan(listBox!.x);
+  // Toggle button now offers collapsing to full reader
+  const fullReaderBtn = article.getByRole('button', { name: 'Full reader' });
+  await expect(fullReaderBtn).toBeVisible();
+
+  // 5. Toggle back to Dedicated Reader
+  await fullReaderBtn.click();
+  await expect(catalogList).toBeHidden();
+
+  // 6. Return to all documents
+  await article.getByRole('button', { name: 'Documents list' }).click();
+  await expect(catalogList).toBeVisible();
+});
+
+test('toggles full reader and split view on wide desktop', async ({ page }) => {
+  const documents = [
+    { name: 'findings.md', kind: 'markdown', size: 100, modifiedAt: '2026-09-22T00:00:00.000Z' },
+  ];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents, folders: [] } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => route.fulfill({ json: { name: 'findings.md', kind: 'markdown', content: '# Desktop Findings' } }));
+
+  await page.goto('/#/workspaces/demo/documents');
+  await page.getByRole('button', { name: /findings.md/ }).click();
+
+  const catalogList = page.getByRole('complementary', { name: 'Documents to open' });
+  const article = page.getByRole('article', { name: 'Document preview' });
+  await expect(catalogList).toBeVisible();
+  await expect(article.getByRole('heading', { name: 'Desktop Findings' })).toBeVisible();
+
+  // On wide desktop, defaults to split view. Toggle button allows collapsing to full reader.
+  const fullReaderBtn = article.getByRole('button', { name: 'Full reader' });
+  await expect(fullReaderBtn).toBeVisible();
+  await fullReaderBtn.click();
+
+  // In full reader mode, catalog list is collapsed
+  await expect(catalogList).toBeHidden();
+
+  // Toggle back to split view
+  const splitBtn = article.getByRole('button', { name: 'Split view' });
+  await expect(splitBtn).toBeVisible();
+  await splitBtn.click();
+  await expect(catalogList).toBeVisible();
+});
+

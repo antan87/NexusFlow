@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import DOMPurify from 'dompurify';
 import { ChatMarkdown, type MarkdownDocumentLinks } from '../../components/ChatMarkdown.js';
+import { cn } from '../../lib/utils.js';
 import {
   buildPreviewDocument,
   CARRIED_ATTRIBUTES,
@@ -72,15 +73,15 @@ export function DocumentPreview({ preview, fileUrl, raw, expanded = false, trust
       trusted,
     });
   }, [preview, raw, trusted]);
-  const height = expanded ? 'h-full' : 'h-[65vh]';
+  const height = expanded ? 'h-full flex-1' : 'h-[65vh]';
 
   // Only the trusted path may run script, and it must never be sandboxed into the app's origin.
   const sandbox = trusted ? 'allow-scripts' : '';
 
-  if (preview.kind === 'markdown' && !raw) return <ChatMarkdown content={preview.content ?? ''} links={links} />;
-  if (preview.kind === 'html' && !raw) return <iframe title={`Preview of ${preview.name}`} sandbox={sandbox} referrerPolicy="no-referrer" srcDoc={htmlDocument} className={`${height} w-full rounded border border-border bg-white`} />;
-  if (preview.content !== undefined) return <pre className="whitespace-pre-wrap break-words text-sm">{preview.content}</pre>;
-  if (preview.kind === 'pdf') return <iframe title={`Preview of ${preview.name}`} src={fileUrl} className={`${height} w-full rounded border border-border`} />;
-  if (preview.kind === 'image') return <img src={fileUrl} alt={preview.name} className={expanded ? 'mx-auto h-full w-auto max-w-full object-contain' : 'max-w-full h-auto'} />;
-  return <p className="text-sm text-muted-foreground">Preview is unavailable for this format. Download the document to open it in its application.</p>;
+  if (preview.kind === 'markdown' && !raw) return <div className={cn('rounded-lg border border-border/80 bg-card/40 p-4 sm:p-5', expanded && 'flex-1 min-h-0')}><ChatMarkdown content={preview.content ?? ''} links={links} /></div>;
+  if (preview.kind === 'html' && !raw) return <iframe title={`Preview of ${preview.name}`} sandbox={sandbox} referrerPolicy="no-referrer" srcDoc={htmlDocument} className={`${height} w-full rounded-lg border border-border bg-white shadow-xs`} />;
+  if (preview.content !== undefined) return <pre className={cn('whitespace-pre-wrap break-words font-mono text-xs sm:text-sm rounded-lg border border-border bg-muted/20 p-4', expanded ? 'flex-1 min-h-0 overflow-auto' : 'overflow-x-auto')}>{preview.content}</pre>;
+  if (preview.kind === 'pdf') return <iframe title={`Preview of ${preview.name}`} src={fileUrl} className={`${height} w-full rounded-lg border border-border`} />;
+  if (preview.kind === 'image') return <div className={cn('flex items-center justify-center rounded-lg border border-border/60 bg-muted/10 p-2 sm:p-4', expanded && 'h-full flex-1')}><img src={fileUrl} alt={preview.name} className={expanded ? 'mx-auto h-full w-auto max-w-full object-contain' : 'max-w-full max-h-[65vh] h-auto rounded'} /></div>;
+  return <div className="rounded-lg border border-dashed border-border p-8 text-center"><p className="text-sm text-muted-foreground">Preview is unavailable for this format. Download the document to open it in its application.</p></div>;
 }

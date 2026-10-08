@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Download, ExternalLink, Maximize2, Minimize2, ShieldAlert, X } from 'lucide-react';
-import { Button } from '../../components/ui/button.js';
+import { createPortal } from 'react-dom';
+import { Check, Copy, Download, ExternalLink, Maximize2, Minimize2, ShieldAlert, X } from 'lucide-react';
+import { Button, buttonVariants } from '../../components/ui/button.js';
 import type { MarkdownDocumentLinks } from '../../components/ChatMarkdown.js';
+import { safeCopyToClipboard } from '../../lib/clipboard.js';
 import { cn } from '../../lib/utils';
 import { DocumentPreview, type DocumentPreviewData } from './DocumentPreview.js';
 import { dependsOnExternalScript } from './previewPolicy.js';
 
 /** Matches the app's existing overlay idiom (dialog.tsx, PluggableDiffViewer, WorktreeTitleModal). */
-const OVERLAY = 'fixed inset-0 z-50 flex flex-col bg-background';
+const OVERLAY = 'fixed inset-0 z-[100] flex flex-col bg-background';
 
 export interface DocumentViewerProps {
   title: string;
@@ -50,18 +52,23 @@ function TrustControl({ trusted, onToggle, compact }: { trusted: boolean; onTogg
 
 /**
  * Owns the maximize affordance for every document surface. Expanding fills the app viewport inside
- * the app's own borders — `fixed inset-0` within the app shell, never the browser Fullscreen API —
- * so Download, the raw toggle and the trust control all stay reachable.
+ * the app's own borders — `fixed inset-0` portaled to `document.body` above the app shell, never the
+ * browser Fullscreen API — so Download, the raw toggle and the trust control all stay reachable, and
+ * docked side panels like the chat cannot overlap it.
  */
 export function DocumentViewer({ title, preview, status, fileUrl = '', downloadHref, browserHref, links, raw, onToggleRaw, rawLabels = ['Raw text', 'Rendered view'], onClose, compact = false, notice, className }: DocumentViewerProps) {
   const [expanded, setExpanded] = useState(false);
   const [trusted, setTrusted] = useState(false);
   const inlineToggle = useRef<HTMLButtonElement>(null);
   const overlayToggle = useRef<HTMLButtonElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const wasExpanded = useRef(false);
 
   // Trust lapses when a different document is opened.
-  useEffect(() => { setTrusted(false); }, [preview?.name]);
+  useEffect(() => {
+    setTrusted(false);
+    setExpanded(false);
+  }, [preview?.name]);
 
   useEffect(() => {
     if (expanded) {
@@ -75,16 +82,52 @@ export function DocumentViewer({ title, preview, status, fileUrl = '', downloadH
     }
   }, [expanded]);
 
+  // Lock background scrolling while expanded.
+  useEffect(() => {
+    if (!expanded || typeof document === 'undefined') return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [expanded]);
+
   useEffect(() => {
     if (!expanded) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.stopPropagation();
-      setExpanded(false);
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        setExpanded(false);
+        return;
+      }
+      if (event.key === 'Tab' && overlayRef.current) {
+        const focusable = overlayRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [expanded]);
+
+  const [copiedPath, setCopiedPath] = useState(false);
+  const pathToCopy = preview?.name ?? title;
+  const handleCopyPath = () => {
+    void safeCopyToClipboard(pathToCopy).then((ok) => {
+      setCopiedPath(ok);
+      if (ok) setTimeout(() => setCopiedPath(false), 1500);
+    });
+  };
 
   const buttonSize = compact ? 'xs' : 'sm';
   const scriptBound = useMemo(
@@ -110,18 +153,50 @@ export function DocumentViewer({ title, preview, status, fileUrl = '', downloadH
   const chrome = (expandedNow: boolean, toggleRef: React.RefObject<HTMLButtonElement | null>) => (
     <>
       <div className={cn('flex flex-wrap items-center justify-between gap-2', compact ? 'mb-2' : 'mb-3')}>
-        <h3 className={cn('break-all font-semibold', compact ? 'text-xs' : 'text-sm')}>{title}</h3>
-        <div className={cn('flex items-center gap-2', compact ? 'text-xs' : 'text-sm')}>
+        <div className="flex items-center gap-2 min-w-0">
+          <h3 className={cn('break-all font-semibold', compact ? 'text-xs' : 'text-sm')}>{title}</h3>
+          {preview?.kind && (
+            <span className="shrink-0 rounded bg-muted/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {preview.kind}
+            </span>
+          )}
+          <Button
+            size={compact ? 'xs' : 'sm'}
+            variant="ghost"
+            className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground gap-1 shrink-0"
+            aria-label={copiedPath ? 'Path copied' : `Copy path ${pathToCopy}`}
+            title={copiedPath ? 'Path copied to clipboard' : 'Copy path'}
+            onClick={handleCopyPath}
+          >
+            {copiedPath ? <Check size={compact ? 11 : 13} className="text-emerald-500" /> : <Copy size={compact ? 11 : 13} />}
+            <span className="text-[11px] hidden sm:inline">{copiedPath ? 'Copied' : 'Copy path'}</span>
+          </Button>
+        </div>
+        <div className={cn('flex flex-wrap items-center gap-2', compact ? 'text-xs' : 'text-sm')}>
           {onToggleRaw && <Button size={buttonSize} variant="outline" onClick={onToggleRaw}>{raw ? rawLabels[1] : rawLabels[0]}</Button>}
           {trustControl}
-          {downloadHref && <a className="text-primary underline" href={downloadHref} download={preview?.name.split('/').pop() ?? title.split('/').pop()}><Download size={compact ? 12 : 14} className="mr-1 inline" />Download</a>}
-          {browserHref && <a
-            className="text-primary underline"
-            href={browserHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Open in your browser, where the document runs as authored"
-          ><ExternalLink size={compact ? 12 : 14} className="mr-1 inline" />Open in browser</a>}
+          {downloadHref && (
+            <a
+              className={cn(buttonVariants({ variant: 'outline', size: buttonSize }), 'gap-1.5')}
+              href={downloadHref}
+              download={preview?.name.split('/').pop() ?? title.split('/').pop()}
+            >
+              <Download size={compact ? 12 : 14} />
+              <span>Download</span>
+            </a>
+          )}
+          {browserHref && (
+            <a
+              className={cn(buttonVariants({ variant: 'outline', size: buttonSize }), 'gap-1.5')}
+              href={browserHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open in your browser, where the document runs as authored"
+            >
+              <ExternalLink size={compact ? 12 : 14} />
+              <span>Open in browser</span>
+            </a>
+          )}
           <Button
             ref={toggleRef}
             size={buttonSize}
@@ -134,7 +209,7 @@ export function DocumentViewer({ title, preview, status, fileUrl = '', downloadH
             {expandedNow ? <Minimize2 size={compact ? 12 : 14} /> : <Maximize2 size={compact ? 12 : 14} />}
             {expandedNow ? 'Collapse' : 'Expand'}
           </Button>
-          {onClose && <Button size={buttonSize} variant="ghost" aria-label="Close document" title="Close document" onClick={onClose}><X size={compact ? 12 : 14} /></Button>}
+          {onClose && <Button size={buttonSize} variant="ghost" aria-label="Close document" title="Close document" onClick={() => { if (expandedNow) setExpanded(false); onClose(); }}><X size={compact ? 12 : 14} /></Button>}
         </div>
       </div>
       {guidance}
@@ -149,15 +224,25 @@ export function DocumentViewer({ title, preview, status, fileUrl = '', downloadH
           {body(false)}
         </div>
       </div>
-      {expanded && (
-        <div className={OVERLAY} role="dialog" aria-label={`Expanded ${title}`} data-testid="document-viewer-expanded">
-          <div className="flex min-h-0 flex-1 flex-col p-3">
-            {chrome(true, overlayToggle)}
-            <div className="min-h-0 flex-1 overflow-auto">
+      {expanded && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={overlayRef}
+          className={OVERLAY}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Expanded ${title}`}
+          data-testid="document-viewer-expanded"
+        >
+          <div className="flex min-h-0 flex-1 flex-col p-3 sm:p-4">
+            <div className="shrink-0 border-b border-border/60 pb-2 mb-2">
+              {chrome(true, overlayToggle)}
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col overflow-auto">
               {body(true)}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
