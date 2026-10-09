@@ -6,6 +6,7 @@ import {
   withStartHarness,
   resolveStartHarness,
   resolveWorktreeBranch,
+  summarizeNames,
   taskTextForSuggestions,
 } from './createWorkspaceFlow.js';
 
@@ -290,5 +291,22 @@ describe('resolveStartHarness', () => {
   it('drops a pick that is not installed', () => {
     expect(resolveStartHarness({ chosen: 'cursor', installed })).toBe('');
     expect(resolveStartHarness({ chosen: 'claude', installed: [] })).toBe('');
+  });
+});
+
+describe('summarizeNames', () => {
+  it('lists every name when they fit', () => {
+    expect(summarizeNames([])).toBe('');
+    expect(summarizeNames(['shop-api'])).toBe('shop-api');
+    expect(summarizeNames(['shop-api', 'shop-web'])).toBe('shop-api, shop-web');
+  });
+
+  it('shows the first few and says how many more', () => {
+    expect(summarizeNames(['a', 'b', 'c'])).toBe('a, b +1');
+    expect(summarizeNames(['a', 'b', 'c', 'd', 'e'])).toBe('a, b +3');
+  });
+
+  it('can show more names when there is room', () => {
+    expect(summarizeNames(['a', 'b', 'c', 'd'], 3)).toBe('a, b, c +1');
   });
 });

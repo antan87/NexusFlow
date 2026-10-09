@@ -80,3 +80,10 @@ export function withStartHarness(assistants: readonly string[], startHarness: st
 export function resolveStartHarness(params: { chosen: string; installed: readonly string[] }): string {
   return params.installed.includes(params.chosen) ? params.chosen : '';
 }
+
+/** "shop-api, shop-web +2": the first few names and how many more there are, for places with little room. */
+export function summarizeNames(names: readonly string[], show = 2): string {
+  const shown = names.slice(0, show).join(', ');
+  const more = names.length - show;
+  return more > 0 ? `${shown} +${more}` : shown;
+}

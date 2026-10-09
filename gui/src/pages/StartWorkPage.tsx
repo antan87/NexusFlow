@@ -57,10 +57,12 @@ import {
   resolveStartHarness,
   resolveWorktreeBranch,
   suggestedBranchName,
+  summarizeNames,
   taskTextForSuggestions,
   withStartHarness,
 } from '../features/workspace-launch/createWorkspaceFlow.js';
 import { HarnessPicker } from '../features/workspace-launch/HarnessPicker.js';
+import { SelectedRepos } from '../features/workspace-launch/SelectedRepos.js';
 
 /** Sentinel select value for ad-hoc repo picking. */
 const AD_HOC = '__ad-hoc__';
@@ -635,6 +637,7 @@ export function StartWorkPage() {
                 loading={repos.isLoading}
                 freshnessMap={freshnessMap}
               />
+              <SelectedRepos repos={selectedRepos} onRemove={(repo) => setAdHocPaths((prev) => prev.filter((path) => path !== repo.path))} />
               <ScaffoldRepoInline onCreated={(repo) => setAdHocPaths((prev) => [...prev, repo.path])} />
             </div>
           )}
@@ -1213,11 +1216,22 @@ export function StartWorkPage() {
         {submitError && <p role="alert" className="text-sm text-destructive">{submitError}</p>}
         {askedWithoutRepo && selectedRepos.length === 0 && <p role="alert" className="text-sm text-destructive">Choose a repository first, then create the workspace.</p>}
 
-        {/* Pinned so Create stays in reach however long the skills list is. */}
-        <div className="sticky bottom-0 z-10 flex items-center justify-between gap-4 border-t border-border bg-background/95 py-3 backdrop-blur">
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <FolderGit2 className="size-3.5" />
-            {selectedRepos.length} repositor{selectedRepos.length === 1 ? 'y' : 'ies'} selected
+        {/* Pinned so Create stays in reach however long the skills list is. Solid, with a short fade above it, so
+            the content passing underneath never shows through the bar. */}
+        <div
+          data-testid="create-footer"
+          className="sticky bottom-0 z-10 flex items-center justify-between gap-4 border-t border-border bg-background py-3 before:pointer-events-none before:absolute before:inset-x-0 before:-top-6 before:h-6 before:bg-linear-to-t before:from-background before:to-transparent"
+        >
+          <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={selectedRepos.map((repo) => repo.name).join(', ')}>
+            <FolderGit2 className="size-3.5 shrink-0" />
+            {selectedRepos.length === 0 ? (
+              'No repository selected'
+            ) : (
+              <>
+                <span className="shrink-0 font-medium text-foreground">{selectedRepos.length} repositor{selectedRepos.length === 1 ? 'y' : 'ies'}</span>
+                <span className="truncate">· {summarizeNames(selectedRepos.map((repo) => repo.name))}</span>
+              </>
+            )}
           </p>
           <Button onClick={submit} disabled={!formValid || createWorkspace.isPending}>
             {createWorkspace.isPending ? <Spinner /> : null}

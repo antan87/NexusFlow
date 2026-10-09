@@ -776,6 +776,66 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await expect.poll(() => suggestBody?.description).toBe('Round every invoice line to two decimals');
   });
 
+  test('shows which repository is selected: in the list, as a chip, and in the pinned bar', async ({ page }) => {
+    await page.goto('/#/new');
+    const footer = page.getByTestId('create-footer');
+    await expect(footer).toContainText('No repository selected');
+
+    await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
+    const chips = page.getByRole('list', { name: 'Selected repositories' });
+    await expect(chips).toContainText('nexus-frontend');
+    await expect(footer).toContainText('1 repository');
+    await expect(footer).toContainText('nexus-frontend');
+
+    // A chip removes its repository without finding it in the list again.
+    await chips.getByRole('button', { name: 'Remove nexus-frontend' }).click();
+    await expect(page.getByRole('checkbox', { name: 'nexus-frontend' })).not.toBeChecked();
+    await expect(chips).toHaveCount(0);
+    await expect(footer).toContainText('No repository selected');
+  });
+
+  test('the pinned Create bar is solid, so content scrolling under it never shows through', async ({ page }) => {
+    await page.goto('/#/new');
+    await expect(page.getByTestId('create-footer')).toBeVisible();
+    // Paint the bar's background onto a canvas: this reads its real opacity, whatever colour syntax the theme uses.
+    const alpha = await page.getByTestId('create-footer').evaluate((element) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = getComputedStyle(element).backgroundColor;
+      context.fillRect(0, 0, 1, 1);
+      return context.getImageData(0, 0, 1, 1).data[3];
+    });
+    expect(alpha).toBe(255);
+  });
+
+  test.describe('with several repositories', () => {
+    // The explicit `[value, { option: true }]` form again: a bare list would be read as that tuple.
+    test.use({
+      reposData: [[
+        { name: 'shop-api', path: 'C:\\mock-dev\\shop-api', defaultBranch: 'main' },
+        { name: 'shop-web', path: 'C:\\mock-dev\\shop-web', defaultBranch: 'main' },
+        { name: 'docs-site', path: 'C:\\mock-dev\\docs-site', defaultBranch: 'main' },
+        { name: 'billing-service-with-a-long-name', path: 'C:\\mock-dev\\billing-service-with-a-long-name', defaultBranch: 'main' },
+      ], { option: true }],
+    });
+
+    test('names the first few in the pinned bar and counts the rest, with every name one hover away', async ({ page }) => {
+      await page.goto('/#/new');
+      for (const name of ['shop-api', 'shop-web', 'billing-service-with-a-long-name']) {
+        await page.getByRole('checkbox', { name }).click();
+      }
+      const footer = page.getByTestId('create-footer');
+      await expect(footer).toContainText('3 repositories');
+      await expect(footer).toContainText('shop-api, shop-web +1');
+      await expect(footer.locator('p')).toHaveAttribute('title', 'shop-api, shop-web, billing-service-with-a-long-name');
+      await expect(page.getByRole('list', { name: 'Selected repositories' }).getByRole('listitem')).toHaveCount(3);
+      // The one left out stays unticked and is not listed.
+      await expect(page.getByRole('checkbox', { name: 'docs-site' })).not.toBeChecked();
+    });
+  });
+
   test('should save settings changes', async ({ page }) => {
     let savedConfig: any = null;
 
