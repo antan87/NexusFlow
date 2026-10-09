@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { getConfigDir, getDefaultConfig, ensureConfigDir, loadConfig, saveConfig } from './config.js';
+import type { NexusFlowConfig } from '../types.js';
 
 vi.mock('node:fs/promises');
 vi.mock('node:os', async () => {
@@ -138,6 +139,66 @@ describe('config core module', () => {
       expect(target).not.toContain('passwd');
       expect(target).not.toContain('pwned');
       expect(path.basename(target)).toBe('config.json');
+    });
+
+    describe('stores only the settings that are part of the config', () => {
+      const written = () => JSON.parse(vi.mocked(fs.writeFile).mock.calls[0][1] as string) as Record<string, unknown>;
+
+      beforeEach(() => {
+        vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+        vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+      });
+
+      it('drops a key that is not part of the config', async () => {
+        await saveConfig({ ...getDefaultConfig(), unknownKey: 'value', nested: { a: 1 } } as unknown as NexusFlowConfig);
+
+        expect(written()).not.toHaveProperty('unknownKey');
+        expect(written()).not.toHaveProperty('nested');
+        expect(written()).toHaveProperty('devDir');
+      });
+
+      it('keeps every setting that is part of the config, including ones only the CLI changes', async () => {
+        const full: Required<NexusFlowConfig> = {
+          version: '1.0.0',
+          devDir: '/custom/dev',
+          workspacesDir: '/custom/ws',
+          defaultAssistant: 'claude',
+          defaultEditor: 'code',
+          scanDepth: 3,
+          excludePatterns: ['dist'],
+          storageProvider: 'local',
+          adapterConfig: { local: { setting: 1 } },
+          plugins: ['/home/me/plugins/mine.mjs'],
+          lastUpdateCheck: '2026-01-01T00:00:00.000Z',
+          latestVersion: '2.0.0',
+          latestDownloadUrl: 'https://example.com/download',
+          latestReleaseNotes: 'notes',
+        };
+
+        await saveConfig(full);
+
+        expect(written()).toEqual(full);
+      });
+
+      it('does not mistake an inherited object property for a setting', async () => {
+        await saveConfig({ ...getDefaultConfig(), toString: 'x', constructor: 'y' } as unknown as NexusFlowConfig);
+
+        expect(Object.keys(written())).not.toContain('toString');
+        expect(Object.keys(written())).not.toContain('constructor');
+      });
+
+      it('drops a stray key that is already on disk the next time the config is saved', async () => {
+        vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({
+          devDir: '/custom/dev',
+          plugins: ['/home/me/plugins/mine.mjs'],
+          strayKey: 'left behind',
+        }));
+
+        await saveConfig(await loadConfig());
+
+        expect(written()).not.toHaveProperty('strayKey');
+        expect(written()).toMatchObject({ devDir: '/custom/dev', plugins: ['/home/me/plugins/mine.mjs'] });
+      });
     });
   });
 });
