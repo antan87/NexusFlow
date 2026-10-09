@@ -104,7 +104,7 @@ export function HarnessPicker({ harnesses, value, onChange, loading }: {
                   <HarnessIcon harness={harness.name} className="size-5" />
                 </span>
                 <span className="min-w-0">
-                  <span className="block truncate text-sm font-semibold">{harnessName(harness.name)}</span>
+                  <span className="block text-sm leading-tight font-semibold break-words">{harnessName(harness.name)}</span>
                   <span id={statusId} className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                     <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full', harness.detected ? 'bg-success' : 'bg-muted-foreground/40')} />
                     {harness.detected ? 'Installed' : 'Not installed'}

@@ -836,6 +836,24 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     });
   });
 
+  // <main> pads its content by a different amount at each breakpoint and a sticky bar respects that padding, so a bar
+  // that is not offset by the same amount leaves a strip of the page showing under it.
+  for (const width of [390, 760, 1280]) {
+    test(`the pinned Create bar sits flush with the bottom of a ${width}px window and spans the page`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 520 });
+      await page.route('**/api/skills', (route) => route.fulfill({
+        json: { skills: Array.from({ length: 30 }, (_, i) => ({ id: `skill-${i}`, name: `skill-${i}`, title: `Skill ${i}`, description: 'Guidance' })) },
+      }));
+      await page.goto('/#/new');
+      await expect(page.getByRole('checkbox', { name: 'Select Skill 29' })).toBeAttached();
+      const bar = (await page.getByTestId('create-footer').boundingBox())!;
+      expect(Math.round(bar.y + bar.height)).toBe(520);
+      // It runs the width of the page, not just the form column (36rem), and nothing sticks out sideways.
+      expect(bar.width).toBeGreaterThan(Math.min(width - 40, 600));
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    });
+  }
+
   test('should save settings changes', async ({ page }) => {
     let savedConfig: any = null;
 

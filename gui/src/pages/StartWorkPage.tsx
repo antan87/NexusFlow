@@ -576,7 +576,8 @@ export function StartWorkPage() {
 
   // ── The form ─────────────────────────────────────────────────────────────
   return (
-    <div className="mx-auto max-w-xl animate-fade-in">
+    <div className="animate-fade-in">
+      <div className="mx-auto max-w-xl">
       <header className="mb-5">
         <h1 className="text-xl font-semibold">New workspace</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -1216,12 +1217,19 @@ export function StartWorkPage() {
         {submitError && <p role="alert" className="text-sm text-destructive">{submitError}</p>}
         {askedWithoutRepo && selectedRepos.length === 0 && <p role="alert" className="text-sm text-destructive">Choose a repository first, then create the workspace.</p>}
 
-        {/* Pinned so Create stays in reach however long the skills list is. Solid, with a short fade above it, so
-            the content passing underneath never shows through the bar. */}
-        <div
-          data-testid="create-footer"
-          className="sticky bottom-0 z-10 flex items-center justify-between gap-4 border-t border-border bg-background py-3 before:pointer-events-none before:absolute before:inset-x-0 before:-top-6 before:h-6 before:bg-linear-to-t before:from-background before:to-transparent"
-        >
+      </div>
+      </div>
+
+      {/* Pinned so Create stays in reach however long the skills list is, as a bar across the whole page with its
+          contents lined up with the form. It sits flush with the bottom of the window: <main> in App.tsx pads its
+          content by 12/20/24px and a sticky element respects that padding, so the bar reaches out by the same amount
+          (the negative offsets and margins) instead of leaving a strip of page showing under or beside it, and takes
+          the same amount back as padding so the button keeps its place. */}
+      <div
+        data-testid="create-footer"
+        className="sticky -bottom-3 z-10 -mx-3 mt-5 -mb-3 border-t border-border bg-background px-3 pt-3 pb-6 shadow-[0_-6px_10px_-8px_rgb(0_0_0/0.14)] sm:-bottom-5 sm:-mx-5 sm:-mb-5 sm:px-5 sm:pb-8 lg:-bottom-6 lg:-mx-6 lg:-mb-6 lg:px-6 lg:pb-9"
+      >
+        <div className="mx-auto flex max-w-xl items-center justify-between gap-4">
           <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={selectedRepos.map((repo) => repo.name).join(', ')}>
             <FolderGit2 className="size-3.5 shrink-0" />
             {selectedRepos.length === 0 ? (
