@@ -15,7 +15,6 @@
  * is reduced to a closed setup state so account and credential details never cross
  * the server boundary.
  */
-import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 export interface CliStatus {

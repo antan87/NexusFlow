@@ -10,6 +10,7 @@ import chalk from 'chalk';
 
 import type { NexusFlowConfig } from '../types.js';
 import { getStorageProvider, setActiveStorageProvider } from './adapters/registry.js';
+import { toPersistedConfig } from './config-schema.js';
 import { debugLog } from '../utils/debug.js';
 
 /**
@@ -154,9 +155,11 @@ export async function loadConfig(options: { quiet?: boolean } = {}): Promise<Nex
  * Persists the given configuration to ~/.nexusflow/config.json.
  * Creates the config directory if it doesn't exist.
  *
- * @param config - The configuration to save.
+ * @param config - The configuration to save. Keys that are not part of
+ *   `NexusFlowConfig` are dropped, so a stray key never lands in the file.
  */
 export async function saveConfig(config: NexusFlowConfig): Promise<void> {
+  config = toPersistedConfig(config);
   await ensureConfigDir();
 
   const configDir = path.resolve(getConfigDir());
@@ -166,12 +169,14 @@ export async function saveConfig(config: NexusFlowConfig): Promise<void> {
   }
 
   const data = JSON.stringify(config, null, 2) + '\n';
-  // codeql[js/http-to-file-access] — the write target is not derived from the payload.
-  // configPath is resolveBrandHomeDir() joined with a constant, and the guard above rejects any
-  // redirection before the write. Callers do pass network-derived config (POST /api/config), but it
-  // is JSON that loadConfig reads back with JSON.parse, and `storageProvider` is a registry lookup
-  // that falls back to local storage rather than a module specifier. Locked in by the
-  // "ignores a config value that tries to become the write path" test in config.test.ts.
+  // The write target is not derived from the payload: configPath is
+  // resolveBrandHomeDir() joined with a constant, and the guard above rejects any redirection before
+  // the write. Callers do pass network-derived config (POST /api/config), but it is JSON that
+  // loadConfig reads back with JSON.parse, and `storageProvider` is a registry lookup that falls back
+  // to local storage rather than a module specifier. Locked in by the "ignores a config value that
+  // tries to become the write path" test in config.test.ts.
+  // This suppression must stay on the line directly above the write or CodeQL stops honouring it.
+  // codeql[js/http-to-file-access]
   await fs.writeFile(configPath, data, 'utf-8');
 
   // Re-activate the storage provider based on the saved configuration.

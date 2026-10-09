@@ -85,3 +85,24 @@ export async function savePlanningNotes(root: string, expectedRevision: string, 
     return { content, revision: revision(content) };
   });
 }
+
+/**
+ * Whether planning notes hold anything beyond the empty template tables: at least one table row
+ * that is neither a header (the row above a `| --- |` separator) nor a separator. Prose alone
+ * does not count, since the template carries its own.
+ */
+export function hasAuthoredPlanningRows(content: string): boolean {
+  const lines = content.split(/\r?\n/);
+  const isRow = (line: string) => line.trimStart().startsWith('|');
+  const isSeparator = (line: string) => isRow(line) && /^[\s|:-]+$/.test(line);
+  return lines.some((line, index) => isRow(line) && !isSeparator(line) && !isSeparator(lines[index + 1] ?? ''));
+}
+
+/** Whether this workspace's planning notes have been written beyond the template. Never throws. */
+export async function planningNotesAreAuthored(root: string): Promise<boolean> {
+  try {
+    return hasAuthoredPlanningRows((await readPlanningNotes(root)).content);
+  } catch {
+    return false;
+  }
+}

@@ -402,7 +402,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
         model: spec.model,
         // Spike 1 finding: Agent SDK env REPLACES process.env, so callers must spread parent process.env.
         env: spec.env ? { ...process.env, ...spec.env } : undefined,
-        mcpServers: spec.mcpServers as any,
+        mcpServers: spec.mcpServers,
         canUseTool,
         includePartialMessages: true, // enables stream_event deltas below
         sessionStore: this.sessionStore as any,
