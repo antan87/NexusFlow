@@ -359,7 +359,7 @@ constructor:
 
 # Proto Test Content`;
 
-      const parsed = parseSkillMarkdown(maliciousYaml);
+      parseSkillMarkdown(maliciousYaml);
       expect(({} as Record<string, unknown>).polluted).toBeUndefined();
       expect(({} as Record<string, unknown>).admin).toBeUndefined();
     });
@@ -493,7 +493,7 @@ constructor:
       // and should update .claude and .cursor with local content.
       expect(isWorkspaceLocalSkill(activeSkill!, tempWorkspace)).toBe(true);
 
-      const secondReconcile = await reconcileWorkspaceResources(
+      await reconcileWorkspaceResources(
         tempWorkspace,
         ['claude', 'cursor'],
         [activeSkill!],

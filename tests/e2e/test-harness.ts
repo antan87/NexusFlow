@@ -13,7 +13,7 @@ import fse from 'fs-extra';
 import { execa } from 'execa';
 
 import { Feature, WorkspaceContext, RepoInfo, ToolResult, WorkspaceSkillsConfig } from '../../src/types.js';
-import { getAllSkills, saveSkill, parseSkillMarkdown, DEFAULT_SKILLS } from '../../src/utils/skills-catalog.js';
+import { parseSkillMarkdown, DEFAULT_SKILLS } from '../../src/utils/skills-catalog.js';
 import { getDomainPack } from '../../src/core/domain-packs.js';
 
 import { buildContextContent } from '../../src/generators/base.js';
