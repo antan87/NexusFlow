@@ -931,7 +931,7 @@ We are working in a multi-repository workspace.
 
 Workspace Metadata:
 - Feature Branch: ${ws.branchName}
-- Purpose & Context: ${ws.description}
+- Purpose & Context: ${ws.description?.trim() || ws.name || ws.branchName}
 - Mapped Repositories: ${repoNames}
 
 Core Instructions:

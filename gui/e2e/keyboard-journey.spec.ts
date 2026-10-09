@@ -51,10 +51,10 @@ test.describe('keyboard-only primary journey', () => {
     await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
 
     await activate(page, page.getByRole('checkbox', { name: 'api' }), 'Space');
-    await tabTo(page, page.getByLabel('What do you want to do?'));
-    await page.keyboard.type('Cache invoice lookups');
     await tabTo(page, page.getByLabel('Workspace name'));
     await page.keyboard.type('Invoice speed-up');
+    await tabTo(page, page.getByLabel('What do you want to do?'));
+    await page.keyboard.type('Cache invoice lookups');
     await activate(page, page.getByRole('button', { name: 'Create workspace' }));
 
     await expect.poll(() => payload?.name).toBe('Invoice speed-up');

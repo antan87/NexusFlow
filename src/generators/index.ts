@@ -56,11 +56,11 @@ export function buildWorkspaceIndex(ctx: WorkspaceContext): string {
   const { feature } = ctx;
   const repos = ctx.repos.map((repo) => `- \`${repo.name}\` — ${repo.path}`).join('\n');
 
+  const summary = feature.description?.trim() ? `${feature.description}\n\n` : '';
+
   return `# Workspace: ${feature.id}
 
-${feature.description}
-
-> Assistant context lives in **AGENTS.md**. Most agent tools read that file
+${summary}> Assistant context lives in **AGENTS.md**. Most agent tools read that file
 > directly; Claude Code falls back to it or reads \`CLAUDE.md\` (which imports it). This file is just
 > an index for people.
 
@@ -112,11 +112,11 @@ function buildKnowledgeContent(ctx: WorkspaceContext): string {
 > behind them, things that cost you time to discover. Avoid restating
 > structure the code already shows.
 
-## Feature Goal
+${feature.description?.trim() ? `## Feature Goal
 
 ${feature.description}
 
-`;
+` : ''}`;
 }
 
 /** Remove only legacy old unchecked template rows; authored progress survives. */

@@ -51,16 +51,23 @@ import { useCreationStream, type CreationStep } from '../lib/api/useCreationStre
 import type { RepoInfo, RepoFreshness, WorkspaceMode, WorkGuidance } from '../types.js';
 import { WorkspaceLauncher } from '../features/workspace-launch/WorkspaceLauncher.js';
 import { floatingChatStore } from '../features/chat/floatingChatStore.js';
+import {
+  handleWorkspaceCreationCompletion,
+  isWorkspaceFormValid,
+  resolveStartHarness,
+  resolveWorktreeBranch,
+  suggestedBranchName,
+  summarizeNames,
+  taskTextForSuggestions,
+  withStartHarness,
+} from '../features/workspace-launch/createWorkspaceFlow.js';
+import { HarnessPicker } from '../features/workspace-launch/HarnessPicker.js';
+import { SelectedRepos } from '../features/workspace-launch/SelectedRepos.js';
 
 /** Sentinel select value for ad-hoc repo picking. */
 const AD_HOC = '__ad-hoc__';
 
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
-
-function suggestedBranchName(name: string): string {
-  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  return slug ? `feature/${slug}` : '';
-}
 
 const MODE_OPTIONS: Array<{ value: WorkspaceMode; icon: typeof Zap; title: string; body: string }> = [
   {
@@ -159,15 +166,11 @@ export function StartWorkPage() {
   const createWorkspace = useCreateWorkspace();
   const { progress, start, reset } = useCreationStream();
   const creationJobId = searchParams.get('job');
-  const openInChat = searchParams.get('from') === 'chat';
-  const openedChatWorkspace = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!openInChat || progress.status !== 'completed' || !progress.workspaceId || openedChatWorkspace.current === progress.workspaceId) return;
-    openedChatWorkspace.current = progress.workspaceId;
-    floatingChatStore.openCli(progress.workspaceId);
-    navigate(`/workspaces/${encodeURIComponent(progress.workspaceId)}`);
-  }, [openInChat, progress.status, progress.workspaceId, navigate]);
+  const openedWorkspace = useRef<string | null>(null);
+  // True once this page instance has submitted a workspace itself. A ?job= link
+  // opened without submitting (and not from chat) only inspects a past job.
+  const [submittedHere, setSubmittedHere] = useState(false);
+  const isDirectReplay = Boolean(creationJobId) && !submittedHere && searchParams.get('from') !== 'chat';
 
   const [projectId, setProjectId] = useState<string>(searchParams.get('project') ?? AD_HOC);
   const [workType, setWorkType] = useState<WorkGuidance['workType']>('feature');
@@ -181,6 +184,26 @@ export function StartWorkPage() {
   const [setupOpen, setSetupOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [assistants, setAssistants] = useState<string[]>([]);
+  // Empty until the developer picks a harness: nothing is ever preselected.
+  const [chosenHarness, setChosenHarness] = useState('');
+  const startHarness = resolveStartHarness({
+    chosen: chosenHarness,
+    installed: (aiDetect.data ?? []).filter((item) => item.detected).map((item) => item.name),
+  });
+  const instructionTargets = withStartHarness(assistants, startHarness);
+
+  useEffect(() => {
+    openedWorkspace.current = handleWorkspaceCreationCompletion({
+      status: progress.status,
+      workspaceId: progress.workspaceId,
+      lastOpenedWorkspaceId: openedWorkspace.current,
+      autoNavigate: !isDirectReplay,
+      startHarness,
+      onChooseHarness: (id, harness) => floatingChatStore.setHarness(id, harness),
+      onOpenCli: (id) => floatingChatStore.openCli(id),
+      onNavigate: (url) => navigate(url),
+    });
+  }, [progress.status, progress.workspaceId, navigate, isDirectReplay, startHarness]);
   const [enabledSkills, setEnabledSkills] = useState<string[]>([]);
   const [enabledAgents, setEnabledAgents] = useState<string[]>([]);
   const [strategyId, setStrategyId] = useState<string>('');
@@ -193,6 +216,8 @@ export function StartWorkPage() {
   const [branchOverrides, setBranchOverrides] = useState<Record<string, string>>({});
   const [overridesOpen, setOverridesOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Enter in the name field was pressed before any repository was chosen: say what is missing instead of doing nothing.
+  const [askedWithoutRepo, setAskedWithoutRepo] = useState(false);
 
   // Tag creation modal state
   const [showCreateTagModal, setShowCreateTagModal] = useState(false);
@@ -233,8 +258,9 @@ export function StartWorkPage() {
 
   /** Keyword-based auto-suggestions from what the developer types in description */
   const suggestedMatches = useMemo(() => {
-    if (!description.trim() || description.trim().length < 3) return [];
-    const text = description.toLowerCase();
+    const task = taskTextForSuggestions(description, workspaceName);
+    if (task.length < 3) return [];
+    const text = task.toLowerCase();
     const suggestions: Array<{ id: string; title: string; type: 'tag' | 'skill' }> = [];
 
     // Match tags
@@ -256,7 +282,7 @@ export function StartWorkPage() {
     }
 
     return suggestions.slice(0, 6);
-  }, [description, domainPacksQuery.data, skillsQuery.data, selectedTags, enabledSkills]);
+  }, [description, workspaceName, domainPacksQuery.data, skillsQuery.data, selectedTags, enabledSkills]);
 
   useEffect(() => {
     if (creationJobId) {
@@ -268,6 +294,7 @@ export function StartWorkPage() {
 
   const returnToForm = () => {
     reset();
+    setSubmittedHere(false);
     setSearchParams((params) => {
       const next = new URLSearchParams(params);
       next.delete('job');
@@ -276,6 +303,7 @@ export function StartWorkPage() {
   };
 
   const startOver = () => {
+    setSubmittedHere(false);
     const url = new URL(window.location.href);
     url.hash = '#/new';
     window.location.replace(url.toString());
@@ -358,9 +386,13 @@ export function StartWorkPage() {
   };
 
   const inPlace = mode === 'in-place';
-  const worktreeBranch = branchName.trim() || suggestedBranchName(workspaceName);
-  const identityValid = workspaceName.trim().length > 0 && (inPlace || worktreeBranch.length > 0);
-  const formValid = identityValid && selectedRepos.length > 0 && description.trim().length > 0;
+  const worktreeBranch = resolveWorktreeBranch(branchName, workspaceName);
+  const formValid = isWorkspaceFormValid({
+    workspaceName,
+    mode,
+    branchName,
+    selectedRepoCount: selectedRepos.length,
+  });
 
   const applyStrategy = (id: string) => {
     setStrategyId(id);
@@ -370,8 +402,9 @@ export function StartWorkPage() {
   };
 
   const suggestStrategy = async () => {
-    if (!description.trim()) {
-      setSubmitError('Describe what you are building first — the suggestion is based on it.');
+    const task = taskTextForSuggestions(description, workspaceName);
+    if (!task) {
+      setSubmitError('Name the workspace or describe the task first — the suggestion is based on it.');
       return;
     }
     setSubmitError(null);
@@ -384,7 +417,7 @@ export function StartWorkPage() {
         customInstructions: string;
       }>('/api/workspace/suggest-workflow', {
         method: 'POST',
-        body: JSON.stringify({ description, repos: selectedRepos }),
+        body: JSON.stringify({ description: task, repos: selectedRepos }),
       });
       setStrategyId(data.suggestedWorkflowId);
       setCustomInstructions(data.customInstructions);
@@ -401,6 +434,7 @@ export function StartWorkPage() {
   const submit = async () => {
     if (submittingRef.current || createWorkspace.isPending || !formValid) return;
     submittingRef.current = true;
+    setSubmittedHere(true);
     setSubmitError(null);
     const payload: CreateWorkspacePayload = {
       workType,
@@ -414,7 +448,7 @@ export function StartWorkPage() {
         existingBranch:
           !inPlace && branchOverrides[repo.path]?.trim() ? branchOverrides[repo.path].trim() : undefined,
       })),
-      assistants,
+      assistants: instructionTargets,
       enabledSkills: enabledSkills.length > 0 ? enabledSkills : undefined,
       enabledAgents: enabledAgents.length > 0 ? enabledAgents : undefined,
       domainPacks: selectedTags.length > 0 ? selectedTags : undefined,
@@ -443,13 +477,16 @@ export function StartWorkPage() {
 
   if (displayedProgress.status !== 'idle') {
     const failedStep = displayedProgress.steps.find((s) => s.status === 'failed');
+    // A creation started here navigates to the workspace as soon as it completes,
+    // so skip the "ready" actions rather than flashing them for a frame.
+    const openingWorkspace = displayedProgress.status === 'completed' && !isDirectReplay;
     return (
       <div className="mx-auto max-w-xl animate-fade-in">
         <h1 className="text-xl font-semibold">
           {displayedProgress.status === 'running'
             ? 'Setting up your workspace…'
             : displayedProgress.status === 'completed'
-              ? 'Workspace ready'
+              ? (openingWorkspace ? 'Opening your workspace…' : 'Workspace ready')
               : displayedProgress.status === 'failed'
                 ? 'Workspace creation failed'
                 : 'Unable to reconnect to workspace setup'}
@@ -483,11 +520,14 @@ export function StartWorkPage() {
         )}
         {submitError && <p className="mt-2 text-sm text-destructive-foreground">{submitError}</p>}
         <div data-testid="workspace-ready-actions" className="mt-6 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
-          {displayedProgress.status === 'completed' && displayedProgress.workspaceId && (
+          {displayedProgress.status === 'completed' && displayedProgress.workspaceId && !openingWorkspace && (
             <>
               <Button
                 className="w-full min-w-0 whitespace-normal sm:w-auto"
-                onClick={() => navigate(`/workspaces/${encodeURIComponent(displayedProgress.workspaceId!)}`)}
+                onClick={() => {
+                  floatingChatStore.openCli(displayedProgress.workspaceId!);
+                  navigate(`/workspaces/${encodeURIComponent(displayedProgress.workspaceId!)}`);
+                }}
               >
                 Open workspace
               </Button>
@@ -536,11 +576,12 @@ export function StartWorkPage() {
 
   // ── The form ─────────────────────────────────────────────────────────────
   return (
-    <div className="mx-auto max-w-xl animate-fade-in">
+    <div className="animate-fade-in">
+      <div className="mx-auto max-w-xl">
       <header className="mb-5">
         <h1 className="text-xl font-semibold">New workspace</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Pick repositories, describe the work, and name this workspace.
+          Pick repositories, name this workspace, and optionally describe the task.
         </p>
         <a
           href="#advanced-setup"
@@ -597,31 +638,43 @@ export function StartWorkPage() {
                 loading={repos.isLoading}
                 freshnessMap={freshnessMap}
               />
+              <SelectedRepos repos={selectedRepos} onRemove={(repo) => setAdHocPaths((prev) => prev.filter((path) => path !== repo.path))} />
               <ScaffoldRepoInline onCreated={(repo) => setAdHocPaths((prev) => [...prev, repo.path])} />
             </div>
           )}
 
         </section>
 
-        {/* Task and name are the only required inputs after repositories. */}
+        {/* Workspace name (required) and task description (optional) */}
         <section>
           <label className="block">
-            <span className="mb-1 block text-sm font-medium">What do you want to do?</span>
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="e.g. Simplify workspace setup and clarify the navigation."
-              rows={3}
-            />
-          </label>
-          <label className="mt-4 block">
             <span className="mb-1 block text-sm font-medium">Workspace name</span>
             <Input
               value={workspaceName}
               onChange={(e) => setWorkspaceName(e.target.value)}
               placeholder="e.g. Simpler workspace setup"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing && !createWorkspace.isPending) {
+                  e.preventDefault();
+                  if (formValid) submit();
+                  else if (selectedRepos.length === 0) setAskedWithoutRepo(true);
+                }
+              }}
+              autoFocus
             />
             <span className="mt-1 block text-xs text-muted-foreground">Shown in the workspace list; separate from a Git branch.</span>
+          </label>
+          <label className="mt-4 block">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-sm font-medium">What do you want to do?</span>
+              <span className="text-xs text-muted-foreground">optional</span>
+            </div>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g. Simplify workspace setup and clarify the navigation."
+              rows={2}
+            />
           </label>
           {suggestedMatches.length > 0 && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
@@ -650,6 +703,8 @@ export function StartWorkPage() {
             </div>
           )}
         </section>
+
+        <HarnessPicker harnesses={aiDetect.data ?? []} value={startHarness} onChange={setChosenHarness} loading={aiDetect.isLoading} />
 
         <section aria-label="Skills">
           {/* Skills Selection */}
@@ -720,16 +775,14 @@ export function StartWorkPage() {
                       )}
                     >
                       <div className="flex items-center gap-2 min-w-0">
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={isChecked}
-                          onChange={() =>
+                          onCheckedChange={() =>
                             setEnabledSkills((prev) =>
                               prev.includes(skill.id) ? prev.filter((id) => id !== skill.id) : [...prev, skill.id],
                             )
                           }
                           aria-label={`Select ${skill.title || skill.name}`}
-                          className="accent-primary"
                         />
                         <div className="min-w-0">
                           <p className="font-mono text-xs font-medium truncate text-foreground">
@@ -1038,7 +1091,7 @@ export function StartWorkPage() {
         <section className="rounded-lg border border-border bg-card p-4" aria-label="AI harnesses">
               <div>
                 <span className="mb-1.5 block text-sm font-medium">AI harnesses</span>
-                <p className="mb-3 text-xs text-muted-foreground">Choose which tools receive workspace instructions. This does not start a session or choose a default harness.</p>
+                <p className="mb-3 text-xs text-muted-foreground">Choose which tools receive workspace instructions. The tool you start with is always included. This does not start a session.</p>
                 <div className="flex flex-wrap gap-3">
                   {(aiDetect.data ?? []).map((assistant) => (
                     <label
@@ -1049,7 +1102,8 @@ export function StartWorkPage() {
                       )}
                     >
                       <Checkbox
-                        checked={assistants.includes(assistant.name)}
+                        checked={instructionTargets.includes(assistant.name)}
+                        disabled={assistant.name === startHarness}
                         onCheckedChange={() =>
                           setAssistants((prev) =>
                             prev.includes(assistant.name)
@@ -1158,14 +1212,34 @@ export function StartWorkPage() {
           </div>}
         </section>
 
-        <ResourcePreview skills={enabledSkills} agents={enabledAgents} assistants={assistants} tagCount={selectedTags.length} />
+        <ResourcePreview skills={enabledSkills} agents={enabledAgents} assistants={instructionTargets} tagCount={selectedTags.length} />
 
         {submitError && <p role="alert" className="text-sm text-destructive">{submitError}</p>}
+        {askedWithoutRepo && selectedRepos.length === 0 && <p role="alert" className="text-sm text-destructive">Choose a repository first, then create the workspace.</p>}
 
-        <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <FolderGit2 className="size-3.5" />
-            {selectedRepos.length} repositor{selectedRepos.length === 1 ? 'y' : 'ies'} selected
+      </div>
+      </div>
+
+      {/* Pinned so Create stays in reach however long the skills list is, as a bar across the whole page with its
+          contents lined up with the form. It sits flush with the bottom of the window: <main> in App.tsx pads its
+          content by 12/20/24px and a sticky element respects that padding, so the bar reaches out by the same amount
+          (the negative offsets and margins) instead of leaving a strip of page showing under or beside it. Its own
+          padding is the same above and below the button, so the button sits in the middle of the bar. */}
+      <div
+        data-testid="create-footer"
+        className="sticky -bottom-3 z-10 -mx-3 mt-5 -mb-3 border-t border-border bg-background px-3 py-3 shadow-[0_-6px_10px_-8px_rgb(0_0_0/0.14)] sm:-bottom-5 sm:-mx-5 sm:-mb-5 sm:px-5 lg:-bottom-6 lg:-mx-6 lg:-mb-6 lg:px-6"
+      >
+        <div className="mx-auto flex max-w-xl items-center justify-between gap-4">
+          <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={selectedRepos.map((repo) => repo.name).join(', ')}>
+            <FolderGit2 className="size-3.5 shrink-0" />
+            {selectedRepos.length === 0 ? (
+              'No repository selected'
+            ) : (
+              <>
+                <span className="shrink-0 font-medium text-foreground">{selectedRepos.length} repositor{selectedRepos.length === 1 ? 'y' : 'ies'}</span>
+                <span className="truncate">· {summarizeNames(selectedRepos.map((repo) => repo.name))}</span>
+              </>
+            )}
           </p>
           <Button onClick={submit} disabled={!formValid || createWorkspace.isPending}>
             {createWorkspace.isPending ? <Spinner /> : null}

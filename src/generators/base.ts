@@ -265,11 +265,12 @@ ${structureRule}${startHint}`
 
   const freshness = ctx.generation ? `${renderFreshnessBanner(ctx.generation)}\n\n` : '';
 
+  // The description is optional at creation; an empty one leaves no blank paragraph.
+  const summary = feature.description?.trim() ? `${feature.description}\n\n` : '';
+
   return `${freshness}# ${feature.id}
 
-${feature.description}
-
-${reposSection}
+${summary}${reposSection}
 
 ## Where to look
 

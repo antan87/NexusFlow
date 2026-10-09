@@ -1706,6 +1706,38 @@ describe('Server API Endpoints Unit Tests', () => {
       );
     });
 
+    it('creates a workspace when description is omitted (optional description)', async () => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({
+        devDir: '/mock',
+        workspacesDir: '/mock/workspaces',
+        storageProvider: 'local'
+      } as any);
+
+      vi.spyOn(workspace, 'createWorkspace').mockResolvedValue('/mock/workspaces/no-desc-ws');
+      vi.spyOn(analyzers, 'analyzeAllRepos').mockResolvedValue(new Map());
+      vi.spyOn(generators, 'generateContextFiles').mockResolvedValue(undefined);
+
+      const response = await app.request('/api/workspace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          branchName: 'no-desc-ws',
+          name: 'Fast workspace',
+          repos: [{ name: 'repo-1', path: '/mock/repo-1' }],
+          assistants: ['claude'],
+        })
+      });
+
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.success).toBe(true);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(vi.mocked(workspace.createWorkspace).mock.calls[0][0].name).toBe('Fast workspace');
+      expect(vi.mocked(workspace.createWorkspace).mock.calls[0][0].description).toBe('');
+    });
+
     it('rejects workspace creation when repo path escapes devDir', async () => {
       vi.spyOn(config, 'loadConfig').mockResolvedValue({
         devDir: '/mock/dev',

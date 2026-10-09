@@ -1459,7 +1459,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       // In-place features never create a branch; keeping branchName populated
       // (= id) avoids breaking every consumer of the non-optional field.
       branchName: inPlace ? workspaceId : body.branchName,
-      description: body.description,
+      description: body.description ?? '',
       repos: inPlace
         ? body.repos.map((r: any) => r.path)
         : body.repos.map((r: any) => path.join(workspacePath, r.name)),
@@ -1473,7 +1473,7 @@ async function runCreationJob(jobId: string, body: any, config: any) {
       organizationId: body.organizationId,
       domainPacks: Array.isArray(body.domainPacks) && body.domainPacks.length > 0
         ? body.domainPacks
-        : matchDomainPacks(body.description, (body.repos || []).map((r: any) => r.name)).map((p) => p.id),
+        : matchDomainPacks(body.description || '', (body.repos || []).map((r: any) => r.name)).map((p) => p.id),
     };
     if (job) {
       job.feature = feature;
@@ -1544,7 +1544,7 @@ app.post('/api/workspace', async (c) => {
       /** Human-readable workspace name; required for in-place mode. */
       name?: string;
       branchName?: string;
-      description: string;
+      description?: string;
       repos: RepoSelection[];
       assistants: any[];
       enabledSkills?: string[];
