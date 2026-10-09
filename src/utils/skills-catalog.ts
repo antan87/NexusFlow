@@ -355,7 +355,7 @@ async function loadSkillFromDir(
   const id = parsedMetadata.data.name;
   const directoryId = path.basename(skillDir);
   if (id !== directoryId) {
-    throw new Error(`Skill name "${id}" must match directory identity "${directoryId}".`);
+    throw new Error(`Skill name "${id}" must match directory identity "${directoryId}". Rename the folder to "${id}", or change name: to "${directoryId}" in SKILL.md.`);
   }
   const name = id;
   const metadataObj = parsedMetadata.data.metadata as Record<string, unknown> | undefined;
@@ -379,11 +379,11 @@ async function loadSkillFromDir(
       .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
       .join(' ');
   const rawMetaCategory = metadataObj && typeof metadataObj.category === 'string' ? metadataObj.category : undefined;
-  const category =
+  const namedCategory =
     parsedMetadata.data.category ||
     (typeof brandMetadata.category === 'string' ? brandMetadata.category : undefined) ||
-    rawMetaCategory ||
-    'general';
+    rawMetaCategory;
+  const category = namedCategory || 'general';
   const description = parsedMetadata.data.description;
   const rawMetaTags =
     metadataObj && Array.isArray(metadataObj.tags)
@@ -466,6 +466,8 @@ async function loadSkillFromDir(
     name,
     title,
     category,
+    // Only set when it applies, so a skill that names its category is unchanged.
+    ...(namedCategory ? {} : { categoryAssumed: true }),
     description,
     tags,
     allowedTools,
@@ -485,7 +487,23 @@ async function loadSkillFromDir(
 /**
  * Retrieves all available skills (built-in templates + user directory + optional workspace directory).
  */
-export interface SkillDiagnostic { id: string; scope: 'global' | 'workspace'; message: string }
+export interface SkillDiagnostic {
+  id: string;
+  scope: 'global' | 'workspace';
+  message: string;
+  /** 'error': the skill was not loaded. 'warning': it loaded, but something is off. Absent means 'error'. */
+  level?: 'error' | 'warning';
+}
+
+/** A skill that names no category loads fine but lands in 'general', where it looks missing. */
+function categoryNotice(id: string, scope: SkillDiagnostic['scope']): SkillDiagnostic {
+  return {
+    id,
+    scope,
+    level: 'warning',
+    message: 'No category is set in SKILL.md, so this skill is listed under "general". Add "category: <name>" to its frontmatter.',
+  };
+}
 
 export async function getAllSkills(workspacePath?: string, diagnostics?: SkillDiagnostic[]): Promise<SkillItem[]> {
   const skillMap = new Map<string, SkillItem>();
@@ -529,10 +547,11 @@ export async function getAllSkills(workspacePath?: string, diagnostics?: SkillDi
                   }
                   loaded.scope = loaded.scope || 'global';
                   skillMap.set(loaded.id, loaded);
+                  if (loaded.categoryAssumed) diagnostics?.push(categoryNotice(loaded.id, 'global'));
                 }
               } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                diagnostics?.push({ id: entryName, scope: 'global', message });
+                diagnostics?.push({ id: entryName, scope: 'global', message, level: 'error' });
                 console.warn(`Skipping invalid skill "${entryName}": ${message}`);
               }
             }
@@ -605,17 +624,18 @@ export async function getAllSkills(workspacePath?: string, diagnostics?: SkillDi
                       const globalSkill = skillMap.get(loaded.id)!;
                       globalSkill.scope = 'global';
                     } else {
-                      diagnostics?.push({ id: loaded.id, scope: 'workspace', message: 'This copy declares global scope or was generated from a global skill, but that catalog source is missing. Restore the source or explicitly convert the package to workspace scope.' });
+                      diagnostics?.push({ id: loaded.id, scope: 'workspace', level: 'error', message: 'This copy declares global scope or was generated from a global skill, but that catalog source is missing. Restore the source or explicitly convert the package to workspace scope.' });
                     }
                   } else {
-                    if (skillMap.has(loaded.id)) diagnostics?.push({ id: loaded.id, scope: 'workspace', message: 'The workspace package overrides a global skill with the same ID. Rename it to keep both independently selectable.' });
+                    if (skillMap.has(loaded.id)) diagnostics?.push({ id: loaded.id, scope: 'workspace', level: 'warning', message: 'The workspace package overrides a global skill with the same ID. Rename it to keep both independently selectable.' });
                     loaded.scope = 'workspace';
                     skillMap.set(loaded.id, loaded);
+                    if (loaded.categoryAssumed) diagnostics?.push(categoryNotice(loaded.id, 'workspace'));
                   }
                 }
               } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                diagnostics?.push({ id: entryName, scope: 'workspace', message });
+                diagnostics?.push({ id: entryName, scope: 'workspace', message, level: 'error' });
                 console.warn(`Skipping invalid workspace skill "${entryName}": ${message}`);
               }
             }

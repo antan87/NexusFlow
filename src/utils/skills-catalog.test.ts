@@ -536,3 +536,123 @@ describe('Skills Catalog & Frontmatter Utils', () => {
     });
   });
 });
+
+describe('Skill discovery diagnostics', () => {
+  let tempHome: string;
+  let workspace: string;
+  const originalEnv = process.env.NEXUSFLOW_HOME;
+  const originalCsEnv = process.env.CONTEXTSPACE_HOME;
+  type Diagnostics = NonNullable<Parameters<typeof getAllSkills>[1]>;
+
+  beforeEach(async () => {
+    tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-skill-diag-home-'));
+    workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'nexusflow-skill-diag-ws-'));
+    process.env.NEXUSFLOW_HOME = tempHome;
+    delete process.env.CONTEXTSPACE_HOME;
+  });
+
+  afterEach(async () => {
+    if (originalEnv !== undefined) process.env.NEXUSFLOW_HOME = originalEnv;
+    else delete process.env.NEXUSFLOW_HOME;
+    if (originalCsEnv !== undefined) process.env.CONTEXTSPACE_HOME = originalCsEnv;
+    else delete process.env.CONTEXTSPACE_HOME;
+    await fse.remove(tempHome);
+    await fse.remove(workspace);
+  });
+
+  /** Writes a SKILL.md by hand, so a test can leave out or get wrong exactly one field. */
+  async function writeSkill(root: string, folder: string, frontmatter: string[]): Promise<void> {
+    await fs.mkdir(path.join(root, folder), { recursive: true });
+    await fs.writeFile(path.join(root, folder, 'SKILL.md'), ['---', ...frontmatter, '---', '', '# Body', ''].join('\n'));
+  }
+  const globalDir = () => path.join(tempHome, 'skills');
+  const workspaceDir = () => path.join(workspace, '.agents', 'skills');
+
+  it('says what to fix when name: does not match the folder', async () => {
+    await writeSkill(globalDir(), 'my-skill', ['name: other-name', 'description: Mismatched', 'category: quality']);
+    const diagnostics: Diagnostics = [];
+
+    const skills = await getAllSkills(undefined, diagnostics);
+
+    expect(skills.some((s) => s.id === 'other-name' || s.id === 'my-skill')).toBe(false);
+    expect(diagnostics).toContainEqual(expect.objectContaining({ id: 'my-skill', scope: 'global', level: 'error' }));
+    const message = diagnostics.find((d) => d.id === 'my-skill')!.message;
+    expect(message).toContain('Rename the folder to "other-name"');
+    expect(message).toContain('change name: to "my-skill"');
+  });
+
+  it('reports a SKILL.md that fails validation as an error', async () => {
+    await writeSkill(globalDir(), 'no-description', ['name: no-description']);
+    const diagnostics: Diagnostics = [];
+
+    await getAllSkills(undefined, diagnostics);
+
+    expect(diagnostics).toContainEqual(expect.objectContaining({ id: 'no-description', level: 'error', message: expect.stringContaining('Invalid SKILL.md') }));
+  });
+
+  it('warns when a skill names no category, because it lands in "general" where it looks missing', async () => {
+    await writeSkill(globalDir(), 'no-category', ['name: no-category', 'description: Names no category']);
+    const diagnostics: Diagnostics = [];
+
+    const skills = await getAllSkills(undefined, diagnostics);
+
+    const loaded = skills.find((s) => s.id === 'no-category')!;
+    expect(loaded.category).toBe('general');
+    expect(loaded.categoryAssumed).toBe(true);
+    expect(diagnostics).toContainEqual(expect.objectContaining({ id: 'no-category', scope: 'global', level: 'warning' }));
+    expect(diagnostics.find((d) => d.id === 'no-category')!.message).toContain('listed under "general"');
+  });
+
+  it('says nothing about a skill that names its category', async () => {
+    await writeSkill(globalDir(), 'has-category', ['name: has-category', 'description: Names one', 'category: quality']);
+    const diagnostics: Diagnostics = [];
+
+    const skills = await getAllSkills(undefined, diagnostics);
+
+    const loaded = skills.find((s) => s.id === 'has-category')!;
+    expect(loaded.category).toBe('quality');
+    expect(loaded).not.toHaveProperty('categoryAssumed');
+    expect(diagnostics.filter((d) => d.id === 'has-category')).toEqual([]);
+  });
+
+  it('also warns about a workspace skill that names no category', async () => {
+    await writeSkill(workspaceDir(), 'local-no-category', ['name: local-no-category', 'description: Local, no category']);
+    const diagnostics: Diagnostics = [];
+
+    await getAllSkills(workspace, diagnostics);
+
+    expect(diagnostics).toContainEqual(expect.objectContaining({ id: 'local-no-category', scope: 'workspace', level: 'warning' }));
+  });
+
+  it('does not warn about the category of a workspace copy of a global skill', async () => {
+    await writeSkill(globalDir(), 'shared', ['name: shared', 'description: Global original']);
+    await writeSkill(workspaceDir(), 'shared', ['name: shared', 'description: Workspace copy', 'scope: global']);
+    const diagnostics: Diagnostics = [];
+
+    await getAllSkills(workspace, diagnostics);
+
+    expect(diagnostics.filter((d) => d.scope === 'workspace')).toEqual([]);
+  });
+
+  it('reports a workspace copy whose global source is missing as an error, and does not load it', async () => {
+    await writeSkill(workspaceDir(), 'orphan', ['name: orphan', 'description: Copy of a deleted global skill', 'category: quality', 'scope: global']);
+    const diagnostics: Diagnostics = [];
+
+    const skills = await getAllSkills(workspace, diagnostics);
+
+    expect(skills.some((s) => s.id === 'orphan')).toBe(false);
+    expect(diagnostics).toContainEqual(expect.objectContaining({ id: 'orphan', scope: 'workspace', level: 'error' }));
+    expect(diagnostics.find((d) => d.id === 'orphan')!.message).toContain('catalog source is missing');
+  });
+
+  it('reports a workspace skill that overrides a global one as a warning, because it still loads', async () => {
+    await writeSkill(globalDir(), 'twin', ['name: twin', 'description: Global twin', 'category: quality']);
+    await writeSkill(workspaceDir(), 'twin', ['name: twin', 'description: Workspace twin', 'category: quality']);
+    const diagnostics: Diagnostics = [];
+
+    const skills = await getAllSkills(workspace, diagnostics);
+
+    expect(skills.find((s) => s.id === 'twin')!.scope).toBe('workspace');
+    expect(diagnostics).toContainEqual(expect.objectContaining({ id: 'twin', scope: 'workspace', level: 'warning', message: expect.stringContaining('overrides a global skill') }));
+  });
+});

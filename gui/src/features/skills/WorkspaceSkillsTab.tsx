@@ -57,6 +57,7 @@ import {
 } from '../../lib/api/queries.js';
 import { CONFIG_DIR } from '../../brand.js';
 import type { Feature, SkillCategory, SkillItem } from '../../types.js';
+import { SkillDiagnosticsPanel } from './SkillDiagnosticsPanel.js';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   'git-pull-request': GitPullRequest,
@@ -461,10 +462,7 @@ export function WorkspaceSkillsTab({ ws, showToast }: WorkspaceSkillsTabProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {diagnostics.length > 0 && <div role="status" className="rounded-lg border border-amber-500/40 p-4 text-sm">
-        <h4 className="font-semibold">Skill discovery notices</h4>
-        <ul className="mt-2 space-y-2">{diagnostics.map((item, index) => <li key={`${item.id}-${index}`}><strong>{item.id}</strong> ({item.scope}): {item.message}</li>)}</ul>
-      </div>}
+      <SkillDiagnosticsPanel diagnostics={diagnostics} />
       {/* Top Banner / Actions Bar */}
       <Card className="p-5 rounded-xl border border-border/80 bg-card/70 backdrop-blur-md shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">

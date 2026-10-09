@@ -37,7 +37,7 @@ import { isolateCommand } from './commands/isolate.js';
 import { mcpRunCommand, mcpSetupCommand } from './commands/mcp.js';
 import { handoffCommand } from './commands/handoff.js';
 import { tagListCommand, tagAddCommand, tagRemoveCommand, tagShowCommand } from './commands/tag.js';
-import { skillListCommand, skillCreateCommand, skillDeleteCommand, skillShowCommand } from './commands/skill.js';
+import { skillListCommand, skillLintCommand, skillCreateCommand, skillDeleteCommand, skillShowCommand } from './commands/skill.js';
 import { refreshCommand } from './commands/refresh.js';
 import { progressCommand } from './commands/progress.js';
 import { remoteAddCommand, remotePullCommand, remotePushCommand } from './commands/remote.js';
@@ -367,7 +367,19 @@ function resolveCliOptions(cmd: any, options: any): any {
 
 const skillCmd = program
   .command('skill')
+  .alias('skills')
   .description('Manage agent skills (workspace-local and global company standards)');
+
+skillCmd
+  .command('lint')
+  .description('Check that every skill loads, and say what to fix for those that do not')
+  .argument('[workspace]', 'Path to workspace (auto-detects from CWD)')
+  .option('--strict', 'Also fail when a skill loads but has something to review')
+  .option('--json', 'Output in JSON format')
+  .action(runAction(async (workspace: string | undefined, options: any, cmd: any) => {
+    const merged = resolveCliOptions(cmd, options);
+    await skillLintCommand(workspace, merged);
+  }));
 
 skillCmd
   .command('list')

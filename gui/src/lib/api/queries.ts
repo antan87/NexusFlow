@@ -24,6 +24,7 @@ import type {
   ServiceFailure,
   ProcfileSuggestion,
   SkillCategory,
+  SkillDiagnosticItem,
   SkillItem,
   CodexAgentItem,
   WorkspaceSkillsConfig,
@@ -469,11 +470,12 @@ export function useDeleteSkillCategory() {
 function skillCatalogOptions(workspaceId?: string) {
   return {
     queryKey: ['skills', workspaceId],
-    queryFn: ({ signal }: { signal: AbortSignal }) => apiFetch<{ skills: SkillItem[]; diagnostics?: Array<{ id: string; scope: string; message: string }> }>(workspaceId ? `/api/skills?workspace=${encodeURIComponent(workspaceId)}` : '/api/skills', { signal }),
+    queryFn: ({ signal }: { signal: AbortSignal }) => apiFetch<{ skills: SkillItem[]; diagnostics?: SkillDiagnosticItem[] }>(workspaceId ? `/api/skills?workspace=${encodeURIComponent(workspaceId)}` : '/api/skills', { signal }),
   };
 }
 
-export function useSkillDiagnostics(workspaceId: string) {
+/** Skills that did not load or need attention. No workspace id means the global catalog. */
+export function useSkillDiagnostics(workspaceId?: string) {
   return useQuery({ ...skillCatalogOptions(workspaceId), select: (data) => data.diagnostics ?? [] });
 }
 
