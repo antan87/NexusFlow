@@ -3,7 +3,7 @@
  * Re-exports all orchestration modules.
  */
 
-export { detectOrchestrationTools, detectServiceConfig, detectAllServices } from './detect.js';
+export { detectOrchestrationTools, detectServiceConfig, detectAllServices, detectDeclaredServices, parseProcfile, suggestProcfiles } from './detect.js';
 export {
   startServices,
   stopServices,
@@ -15,6 +15,7 @@ export {
   loadRunningState,
   readRawRunningState,
   getPm2List,
+  readPm2List,
 } from './runner.js';
 export { tailLogFile } from './log-tail.js';
-export { startOrchestrator, stopOrchestrator } from './orchestrator.js';
+export { startOrchestrator, stopOrchestrator, stopRecordedOrchestrator } from './orchestrator.js';

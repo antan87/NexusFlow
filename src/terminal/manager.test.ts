@@ -56,6 +56,43 @@ describe('backend-owned terminals', () => {
     expect(() => f.manager.control('alice', 'workspace', id, f.client, { type: 'input', data: 'x'.repeat(20_000) })).toThrow();
     f.manager.dispose();
   });
+  it('lists one owner\'s running terminals in every workspace, with whether a window shows them and when they stop', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-04T10:00:00.000Z'));
+    const outputs: ((data: string) => void)[] = [], exits: ((event: { exitCode: number }) => void)[] = [];
+    const factory = vi.fn(async () => ({ pid: 1, write: vi.fn(), resize: vi.fn(), pause: vi.fn(), resume: vi.fn(), kill: vi.fn(),
+      onData: vi.fn(fn => { outputs.push(fn); return { dispose() {} }; }), onExit: vi.fn(fn => { exits.push(fn); return { dispose() {} }; }) }) as unknown as PtyProcess);
+    const manager = new TerminalManager(factory, vi.fn(), 5 * 60_000);
+    const launch = { file: '/bin/sh', args: [], env: {}, label: 'Claude Code' };
+    const shown = await manager.create({ owner: 'alice', workspace: 'alpha', cwd: '/alpha', target: 'claude', launchId: 'a', launch });
+    const hidden = await manager.create({ owner: 'alice', workspace: 'beta', cwd: '/beta', target: 'claude', launchId: 'b', launch });
+    await manager.create({ owner: 'bob', workspace: 'alpha', cwd: '/alpha', target: 'shell', launchId: 'c', launch });
+    const client = { send: vi.fn(), close: vi.fn() };
+    manager.attach('alice', 'alpha', shown.id, client);
+    vi.setSystemTime(new Date('2026-10-04T10:00:05.000Z'));
+    outputs[0]!('thinking...');
+
+    const byWorkspace = (owner: string) => Object.fromEntries(manager.running(owner).map(terminal => [terminal.workspace, terminal]));
+    expect(Object.keys(byWorkspace('alice')).sort()).toEqual(['alpha', 'beta']);
+    expect(byWorkspace('alice').alpha).toMatchObject({ id: shown.id, target: 'claude', attached: true, lastOutputAt: '2026-10-04T10:00:05.000Z', stopsAt: undefined });
+    // Never shown in a window: it stops when the grace period started at launch runs out.
+    expect(byWorkspace('alice').beta).toMatchObject({ id: hidden.id, attached: false, lastOutputAt: undefined, stopsAt: '2026-10-04T10:05:00.000Z' });
+    expect(Object.keys(byWorkspace('bob'))).toEqual(['alpha']);
+    expect(manager.running('mallory')).toEqual([]);
+
+    // Its chat closes: still running, and it says when it will stop.
+    vi.setSystemTime(new Date('2026-10-04T10:01:00.000Z'));
+    manager.detach('alice', 'alpha', shown.id, client);
+    expect(byWorkspace('alice').alpha).toMatchObject({ attached: false, stopsAt: '2026-10-04T10:06:00.000Z' });
+    // Shown again: no stop time.
+    manager.attach('alice', 'alpha', shown.id, client);
+    expect(byWorkspace('alice').alpha).toMatchObject({ attached: true, stopsAt: undefined });
+
+    // An exited terminal is no longer running, though it is kept a while for its output.
+    exits[1]!({ exitCode: 0 });
+    expect(Object.keys(byWorkspace('alice'))).toEqual(['alpha']);
+    expect(manager.list('alice', 'beta')).toHaveLength(1);
+    manager.dispose();
+  });
   it('expires abandoned sessions and terminates live processes on shutdown', async () => {
     vi.useFakeTimers(); const f = fixture(1000); const { id } = await f.manager.create(f.input);
     f.manager.attach('alice', 'workspace', id, f.client); await vi.advanceTimersByTimeAsync(1200);

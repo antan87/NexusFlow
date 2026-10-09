@@ -53,9 +53,9 @@ Resume command references, checked September 2026:
 | Cursor Agent | Native picker for unindexed history | [`agent ls`](https://cursor.com/docs/cli/overview) |
 | Pi | `pi --session ID` | [`pi --resume`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md) |
 
-Hiding, minimizing, maximizing, and switching workspace tabs keep the terminal
+Hiding, minimizing, maximizing, and switching sessions keep the terminal
 running. A browser reload reconnects to the same backend process. Closing a
-workspace tab or losing its connection starts a five-minute reconnect grace
+session or losing its connection starts a five-minute reconnect grace
 period; after that the terminal is stopped. **End session** stops the process
 and its current descendants. Quitting or restarting the backend ends terminals.
 These are live sessions, not a daemon that survives app restarts.
@@ -86,6 +86,22 @@ starts a new process as before. A terminal that has ended (its grace period
 passed, or the backend restarted) is labeled **Ended** rather than offered for
 **Reconnect**. It offers **Resume conversation** when its conversation was
 linked, and **Continue a conversation** otherwise.
+
+## Switching between sessions
+
+Open workspaces are listed in the sidebar under **Open sessions**, in the order they were opened. Choosing one never
+reorders the list, and the one on screen is always marked. Close a session with its cross, or with Delete while it has
+focus. The collapsed sidebar shows the same sessions as their initials. A dot beside a session means its terminal
+stopped, lost its connection, or printed something while you were elsewhere.
+
+| Keys | Does |
+| --- | --- |
+| Alt+Up, Alt+Down (Option on a Mac) | Go to the previous or next session, wrapping round |
+| Alt+1 to Alt+9 | Go to that session |
+
+Both keep the part of the workspace you are reading, such as the plan or the changes. The terminal keeps every other key,
+including Alt+Left and Alt+Right for moving by word. A key the app has nothing to do with also reaches the CLI: Alt+Down
+when only one session is open, or Alt+4 when there are three.
 
 ## Development and verification
 

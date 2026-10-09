@@ -28,6 +28,16 @@ test.use({ workspacesData: [feature], workspacesStatusData: {
   gutter: { id: 'gutter', branchName: 'gutter', changedFiles: 1, dirtyRepos: 1, syncStatus: 'up-to-date', runningServices: 0 },
 } });
 
+/** Opens the changed file and switches to the zero-worker engine, which is opt-in from the diff's options. */
+const switchToPlainPatch = async (page: import('@playwright/test').Page) => {
+  const code = page.getByRole('region', { name: 'Workspace code' });
+  await code.getByRole('treeitem', { name: /calc\.ts/ }).click();
+  await code.getByRole('toolbar', { name: 'Diff' }).getByRole('button', { name: 'More diff options' }).click();
+  const plain = page.getByRole('menuitemcheckbox', { name: 'Plain patch view' });
+  await plain.click();
+  await expect(page.getByTestId('fallback-diff')).toBeVisible();
+};
+
 /** Every rendered row, including deletions and file headers. */
 const gutterRows = (page: import('@playwright/test').Page) =>
   page.getByTestId('fallback-diff').locator(':scope > div');
@@ -39,34 +49,28 @@ test('the lightweight fallback diff reports real original and modified line numb
   await page.route('**/api/workspace/gutter/changes/symbols', route => route.fulfill(json({ symbols: [] })));
   await page.route('**/api/workspace/gutter/changes/diff?*', route => route.fulfill(json({ diff, fileContent: 'x\n', originalContent: 'y\n', symbols: [] })));
   await page.goto('/#/workspaces/gutter/changes');
-  await page.getByRole('button', { name: 'Expand All', exact: true }).click();
-  await page.getByRole('button', { name: /calc\.ts/ }).first().click();
-
-  // Switch to the zero-worker engine, which is opt-in from the toolbar.
-  const engine = page.getByTitle('Toggle between Monaco Diff Editor and Lightweight Fallback');
-  await expect(engine).toBeVisible();
-  await engine.click();
-  await expect(engine).toHaveText('Fallback');
+  await switchToPlainPatch(page);
 
   const rows = gutterRows(page);
   await expect(rows).toHaveCount(9);
   const lines = await rows.evaluateAll(nodes => nodes.map(node => ({
     orig: node.getAttribute('data-orig-line') ?? '',
     mod: node.getAttribute('data-mod-line') ?? '',
-    text: (node.querySelectorAll('span')[2]?.textContent ?? '').trim(),
+    marker: (node.querySelectorAll('span')[2]?.textContent ?? '').trim(),
+    text: (node.querySelectorAll('span')[3]?.textContent ?? '').trim(),
   })));
 
   // Hunk header says -10,4 +10,4, so:
   expect(lines).toEqual([
-    { orig: '', mod: '', text: 'diff --git a/src/calc.ts b/src/calc.ts' },
-    { orig: '', mod: '', text: 'index 1111111..2222222 100644' },
-    { orig: '', mod: '', text: '--- a/src/calc.ts' },
-    { orig: '', mod: '', text: '+++ b/src/calc.ts' },
-    { orig: '10', mod: '10', text: '@@ -10,4 +10,4 @@ export function total(values) {' },
-    { orig: '10', mod: '10', text: 'const sum = 0;' },
-    { orig: '11', mod: '', text: '-  return sum + 1;' },
-    { orig: '', mod: '11', text: '+  return sum + 2;' },
-    { orig: '12', mod: '12', text: '}' },
+    { orig: '', mod: '', marker: '', text: 'diff --git a/src/calc.ts b/src/calc.ts' },
+    { orig: '', mod: '', marker: '', text: 'index 1111111..2222222 100644' },
+    { orig: '', mod: '', marker: '', text: '--- a/src/calc.ts' },
+    { orig: '', mod: '', marker: '', text: '+++ b/src/calc.ts' },
+    { orig: '10', mod: '10', marker: '', text: '@@ -10,4 +10,4 @@ export function total(values) {' },
+    { orig: '10', mod: '10', marker: '', text: 'const sum = 0;' },
+    { orig: '11', mod: '', marker: '-', text: 'return sum + 1;' },
+    { orig: '', mod: '11', marker: '+', text: 'return sum + 2;' },
+    { orig: '12', mod: '12', marker: '', text: '}' },
   ]);
 });
 
@@ -77,9 +81,7 @@ test('the fallback gutter never falls back to a patch-array index', async ({ pag
   await page.route('**/api/workspace/gutter/changes/symbols', route => route.fulfill(json({ symbols: [] })));
   await page.route('**/api/workspace/gutter/changes/diff?*', route => route.fulfill(json({ diff, fileContent: 'x\n', originalContent: 'y\n', symbols: [] })));
   await page.goto('/#/workspaces/gutter/changes');
-  await page.getByRole('button', { name: 'Expand All', exact: true }).click();
-  await page.getByRole('button', { name: /calc\.ts/ }).first().click();
-  await page.getByTitle('Toggle between Monaco Diff Editor and Lightweight Fallback').click();
+  await switchToPlainPatch(page);
 
   const numbers = await gutterRows(page).evaluateAll(nodes => nodes.flatMap(node => ['data-orig-line', 'data-mod-line']
     .map(attribute => node.getAttribute(attribute) ?? '')

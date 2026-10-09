@@ -5,14 +5,14 @@ import type { AISession } from '../../types.js';
 export function useWorkspaceSessionSources(workspace: string, enabled: boolean) {
   const catalog = useQuery({
     queryKey: ['terminal-resume-sources'],
-    queryFn: () => apiFetch<{ sources: string[] }>('/api/session-sources'),
+    queryFn: ({ signal }) => apiFetch<{ sources: string[] }>('/api/session-sources', { signal }),
     enabled,
     staleTime: Infinity,
   });
   const sources = catalog.data?.sources ?? [];
   const histories = useQueries({ queries: sources.map(source => ({
     queryKey: ['terminal-resume-source', workspace, source],
-    queryFn: () => apiFetch<{ sessions: AISession[] }>(`/api/workspace/${encodeURIComponent(workspace)}/sessions?source=${source}`),
+    queryFn: ({ signal }: { signal: AbortSignal }) => apiFetch<{ sessions: AISession[] }>(`/api/workspace/${encodeURIComponent(workspace)}/sessions?source=${source}`, { signal }),
     enabled,
     staleTime: 15_000,
   })) });

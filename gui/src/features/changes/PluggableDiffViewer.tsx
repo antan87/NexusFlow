@@ -10,19 +10,26 @@ import {
   ExternalLink,
   Check,
   X,
-  RefreshCw,
-  ChevronLeft,
-  ChevronRight,
-  Code2,
-  FileText,
+  ChevronDown,
+  ChevronUp,
   MessageSquare,
   ListTree,
+  MoreHorizontal,
 } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
+import { Menu, MenuCheckboxItem, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from '../../components/ui/menu.js';
 import type { DiffViewMode, DiffHunkAction } from './types.js';
-import { parseUnifiedDiff, mapRealLineToSnippetLine } from './utils/diffParser.js';
+import {
+  parseUnifiedDiff,
+  mapRealLineToSnippetLine,
+  getHunkSnippetLine,
+  getHunkFirstChangedSnippetLine,
+  getHunkFirstChangedLineModified,
+  hunkIndexAtSnippetLine,
+  hunkLineKind,
+} from './utils/diffParser.js';
 import { FallbackDiffAdapter } from './adapters/FallbackDiffAdapter.js';
-import { launchVsCodeDiff, openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
+import { openInVsCodeAtLine, getEditorLabel } from './adapters/ExternalDiffLauncher.js';
 import { ChangesetSymbolNavigator } from './ChangesetSymbolNavigator.js';
 import {
   globalChangesetSymbolIndex,
@@ -88,7 +95,9 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   const [refineModalOpen, setRefineModalOpen] = useState(false);
   const [refineFeedback, setRefineFeedback] = useState('');
   const [symbolsOpen, setSymbolsOpen] = useState(false);
-  const [targetLine, setTargetLine] = useState<number | undefined>(initialTargetLine);
+  const [realTargetLine, setRealTargetLine] = useState<number | undefined>(initialTargetLine);
+  const [realTargetOrigLine, setRealTargetOrigLine] = useState<number | undefined>(undefined);
+  const [explicitSnippetTargetLine, setExplicitSnippetTargetLine] = useState<number | undefined>(undefined);
   const [jumpNonce, setJumpNonce] = useState(0);
   const editorLabel = getEditorLabel(defaultEditor);
 
@@ -111,7 +120,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
     ));
   }, [repoName, filePath, fullFileContent, parsed.modifiedContent, hunks, repoPath, preExtractedSymbols]);
 
-  // If initialTargetLine changes from parent, sync targetLine and active hunk without jumping back on background diff updates
+  // If initialTargetLine changes from parent, sync realTargetLine and active hunk
   const lastTargetLineJumpRef = useRef<string>('');
   useEffect(() => {
     if (initialTargetLine && initialTargetLine > 0) {
@@ -119,14 +128,9 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
       if (lastTargetLineJumpRef.current === jumpKey) return;
       lastTargetLineJumpRef.current = jumpKey;
 
-      let targetJumpLine = initialTargetLine;
-      if (!fullFileContent) {
-        const snippetLine = mapRealLineToSnippetLine(initialTargetLine, hunks);
-        if (snippetLine !== null) {
-          targetJumpLine = snippetLine;
-        }
-      }
-      setTargetLine(targetJumpLine);
+      setRealTargetLine(initialTargetLine);
+      setRealTargetOrigLine(undefined);
+      setExplicitSnippetTargetLine(undefined);
       setJumpNonce((n) => n + 1);
       const matchingIndex = hunks.findIndex(
         (h) =>
@@ -137,7 +141,35 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
         setActiveHunkIndex(matchingIndex);
       }
     }
-  }, [initialTargetLine, filePath, hunks, fullFileContent]);
+  }, [initialTargetLine, filePath, hunks]);
+
+  // When !fullFileContent, map real line numbers to snippet lines for MonacoDiffAdapter,
+  // while FallbackDiffAdapter receives real line numbers (matching its data-mod-line attributes).
+  const monacoTargetLine = useMemo(() => {
+    if (!fullFileContent && explicitSnippetTargetLine !== undefined) {
+      return explicitSnippetTargetLine;
+    }
+    if (!realTargetLine || realTargetLine <= 0) return undefined;
+    if (fullFileContent) return realTargetLine;
+    const snippetLine = mapRealLineToSnippetLine(realTargetLine, hunks);
+    if (snippetLine !== null) {
+      return snippetLine;
+    }
+    // If realTargetLine falls on a hunk without additions/context (e.g. pure deletion),
+    // find the snippet start position for that hunk
+    const hunkIdx = hunks.findIndex(
+      (h) =>
+        realTargetLine >= h.startLineModified &&
+        realTargetLine <= h.startLineModified + Math.max(h.lineCountModified, 1) - 1
+    );
+    if (hunkIdx !== -1) {
+      return getHunkSnippetLine(hunkIdx, hunks);
+    }
+    return undefined;
+  }, [explicitSnippetTargetLine, realTargetLine, fullFileContent, hunks]);
+
+  const fallbackTargetLine = realTargetLine;
+  const fallbackTargetOrigLine = realTargetOrigLine;
 
   const toggleViewMode = () => {
     if (onToggleViewMode) {
@@ -147,16 +179,27 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
     }
   };
 
-  const tabsContainerRef = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLDivElement>(null);
 
   const handleSelectHunk = useCallback((index: number) => {
     if (index >= 0 && index < hunks.length && hunks[index]) {
+      const hunk = hunks[index];
+      const targetModified = hunk.firstChangedLineModified ?? getHunkFirstChangedLineModified(hunk);
+      const targetSnippet = hunk.firstChangedSnippetLine ?? getHunkFirstChangedSnippetLine(index, hunks);
+      const hasAdds = hunk.lines.some((line) => hunkLineKind(line) === 'added');
+      const targetOriginal = !hasAdds ? (hunk.firstChangedLineOriginal ?? hunk.startLineOriginal) : undefined;
+
       setActiveHunkIndex(index);
-      setTargetLine(Math.max(1, hunks[index].startLineModified));
+      setRealTargetLine(Math.max(1, targetModified));
+      setRealTargetOrigLine(targetOriginal);
+      if (!fullFileContent) {
+        setExplicitSnippetTargetLine(targetSnippet);
+      } else {
+        setExplicitSnippetTargetLine(undefined);
+      }
       setJumpNonce((n) => n + 1);
     }
-  }, [hunks]);
+  }, [hunks, fullFileContent]);
 
   const handleNextHunk = useCallback(() => {
     if (activeHunkIndex < hunks.length - 1) {
@@ -208,18 +251,17 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   const handleSymbolSelect = (symbol: ChangesetSymbol) => {
     const cleanCurrent = filePath.replace(/\\/g, '/').replace(/^\//, '');
     if (symbol.filePath === cleanCurrent) {
-      let targetJumpLine = symbol.lineNumber;
       if (!fullFileContent) {
         const snippetLine = mapRealLineToSnippetLine(symbol.lineNumber, hunks);
-        if (snippetLine !== null) {
-          targetJumpLine = snippetLine;
-        } else {
+        if (snippetLine === null) {
           showToast?.(`"${symbol.name}" is outside diff hunks (line ${symbol.lineNumber})`, 'info');
           openInVsCodeAtLine(repoPath, filePath, symbol.lineNumber, symbol.column, defaultEditor);
           return;
         }
       }
-      setTargetLine(targetJumpLine);
+      setRealTargetLine(symbol.lineNumber);
+      setRealTargetOrigLine(undefined);
+      setExplicitSnippetTargetLine(undefined);
       setJumpNonce((n) => n + 1);
 
       // Synchronize active hunk with target symbol
@@ -239,21 +281,22 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
   };
 
   const handleLineSelect = useCallback((line: number) => {
-    const matchingIndex = hunks.findIndex(
-      (h) =>
-        line >= h.startLineModified &&
-        line <= h.startLineModified + Math.max(h.lineCountModified, 1) - 1
-    );
-    if (matchingIndex !== -1 && matchingIndex !== activeHunkIndex) {
-      setActiveHunkIndex(matchingIndex);
+    if (fullFileContent) {
+      const matchingIndex = hunks.findIndex(
+        (h) =>
+          line >= h.startLineModified &&
+          line <= h.startLineModified + Math.max(h.lineCountModified, 1) - 1
+      );
+      if (matchingIndex !== -1 && matchingIndex !== activeHunkIndex) {
+        setActiveHunkIndex(matchingIndex);
+      }
+    } else {
+      // In the snippet view the cursor line is a snippet line.
+      const matchingIndex = hunkIndexAtSnippetLine(line, hunks);
+      if (matchingIndex !== -1 && matchingIndex !== activeHunkIndex) setActiveHunkIndex(matchingIndex);
     }
-  }, [hunks, activeHunkIndex]);
+  }, [hunks, activeHunkIndex, fullFileContent]);
 
-  useEffect(() => {
-    if (!tabsContainerRef.current) return;
-    const activeTab = tabsContainerRef.current.querySelector<HTMLElement>('[data-active-tab="true"]');
-    activeTab?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
-  }, [activeHunkIndex]);
 
   // Keyboard shortcut listener for fast hunk triage.
   //
@@ -288,183 +331,105 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
 
   const displayedSymbols = changesetSymbols && changesetSymbols.length > 0 ? changesetSymbols : fileSymbols;
 
+  const atFirst = activeHunkIndex <= 0;
+  const atLast = activeHunkIndex >= hunks.length - 1;
+  const firstChangedLine = (hunk: DiffHunkAction) => hunk.firstChangedLineModified ?? hunk.startLineModified;
+  const countLines = (hunk: DiffHunkAction, sign: '+' | '-') => hunk.lines.filter((line) => hunkLineKind(line) === (sign === '+' ? 'added' : 'removed')).length;
+  const toolbarButton = 'inline-flex h-6 items-center gap-1 rounded px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40';
+
   return (
     <div
       ref={root}
       className={cn(
         'flex flex-col overflow-hidden',
         fillContainer
-          ? 'h-full w-full min-h-0 bg-background border-0 rounded-none shadow-none my-0'
-          : 'rounded-xl border border-border/80 bg-card/60 backdrop-blur-md shadow-sm my-2'
+          ? 'h-full w-full min-h-0 bg-background'
+          : 'my-2 rounded-lg border border-border bg-card'
       )}
     >
-      {/* ─── TOP DIFF TOOLBAR ─────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-border/60 bg-muted/20 text-xs shrink-0">
-        {/* File & Hunk Summary */}
-        <div className="flex items-center gap-2 min-w-0">
-          <FileText size={13} className="text-primary shrink-0" />
-          <span className="font-mono text-xs font-semibold text-foreground truncate" title={filePath}>
-            {filePath}
-          </span>
-          <span className="font-mono text-[10px] text-muted-foreground bg-muted px-1.5 py-0.2 rounded border border-border/40">
-            {repoName}
-          </span>
-          {hunks.length > 0 && (
-            <span className="font-mono text-[10px] text-muted-foreground">
-              {hunks.length} {hunks.length === 1 ? 'hunk' : 'hunks'}
-            </span>
+      {/* One slim row: which change is in view and how to move between them, then how the diff is shown. */}
+      <div role="toolbar" aria-label="Diff" className="flex h-8 shrink-0 items-center gap-0.5 border-b border-border px-1.5 text-xs">
+        {hunks.length > 0 ? (
+          <>
+            <button type="button" className={toolbarButton} onClick={handlePrevHunk} disabled={atFirst && !onPrevFile}
+              aria-label={atFirst && onPrevFile ? 'Previous file' : 'Previous change'} title={atFirst && onPrevFile ? 'Previous file' : 'Previous change (k)'}>
+              <ChevronUp className="size-3.5" />
+            </button>
+            <button type="button" className={toolbarButton} onClick={handleNextHunk} disabled={atLast && !onNextFile}
+              aria-label={atLast && onNextFile ? 'Next file' : 'Next change'} title={atLast && onNextFile ? 'Next file' : 'Next change (j)'}>
+              <ChevronDown className="size-3.5" />
+            </button>
+            <Menu>
+              <MenuTrigger className={cn(toolbarButton, 'font-medium text-foreground')} aria-label={`Change ${activeHunkIndex + 1} of ${hunks.length}. Jump to a change`}>
+                <span className="tabular-nums">Change {activeHunkIndex + 1} of {hunks.length}</span>
+                <ChevronDown className="size-3 opacity-60" />
+              </MenuTrigger>
+              <MenuPopup align="start" className="max-h-80 w-80 overflow-y-auto">
+                {hunks.map((hunk, index) => (
+                  <MenuItem key={hunk.id} onClick={() => handleSelectHunk(index)} className={cn('text-xs', index === activeHunkIndex && 'font-semibold')}>
+                    <span className="w-16 shrink-0 tabular-nums">Change {index + 1}</span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
+                      L{firstChangedLine(hunk)}{hunk.enclosingDeclaration ? ` · ${hunk.enclosingDeclaration}` : ''}
+                    </span>
+                    <span className="shrink-0 font-mono text-[10px]">
+                      <span className="text-success-foreground">+{countLines(hunk, '+')}</span> <span className="text-destructive-foreground">−{countLines(hunk, '-')}</span>
+                    </span>
+                  </MenuItem>
+                ))}
+              </MenuPopup>
+            </Menu>
+            {currentHunk?.enclosingDeclaration && (
+              <span className="ml-1 hidden min-w-0 truncate font-mono text-[11px] text-muted-foreground sm:inline" title={currentHunk.enclosingDeclaration}>
+                {currentHunk.enclosingDeclaration}
+              </span>
+            )}
+            {currentHunk && hunkStates[currentHunk.id] && (
+              <span className="ml-1 shrink-0 rounded border border-border px-1 text-[10px] uppercase text-muted-foreground">{hunkStates[currentHunk.id]}</span>
+            )}
+          </>
+        ) : (
+          <span className="px-1.5 text-muted-foreground">No changed lines to show</span>
+        )}
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          {onRequestRefine && currentHunk && (
+            <button type="button" className={toolbarButton} onClick={handleOpenRefineModal} title="Ask the CLI to change this part">
+              <MessageSquare className="size-3.5" /><span className="hidden md:inline">Refine</span>
+            </button>
           )}
-        </div>
-
-        {/* View Mode & Engine Controls */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          {/* Symbol Explorer Toggle */}
-          <button
-            type="button"
-            onClick={() => setSymbolsOpen((prev) => !prev)}
-            className={cn(
-              'inline-flex items-center gap-1 font-mono text-[11px] px-2 py-1 rounded border transition-colors cursor-pointer',
-              symbolsOpen
-                ? 'border-primary/50 bg-primary/15 text-primary font-semibold'
-                : 'border-border bg-card/60 hover:bg-accent text-muted-foreground hover:text-foreground'
-            )}
-            title="Toggle Changeset Symbol Navigator"
-          >
-            <ListTree size={12} />
-            <span>Symbols</span>
-            {displayedSymbols.length > 0 && (
-              <span className="text-[10px] opacity-75">({displayedSymbols.length})</span>
-            )}
+          <button type="button" className={cn(toolbarButton, viewMode === 'side-by-side' && 'bg-accent text-foreground')} onClick={toggleViewMode}
+            aria-pressed={viewMode === 'side-by-side'} aria-label="Side by side" title={viewMode === 'side-by-side' ? 'Show the change inline' : 'Show the change side by side'}>
+            <Columns2 className="size-3.5" />
           </button>
-
-          {/* Split / Unified Toggle */}
-          <button
-            type="button"
-            onClick={toggleViewMode}
-            className="inline-flex items-center gap-1 font-mono text-[11px] px-2 py-1 rounded border border-border bg-card/60 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            title="Toggle between Side-by-Side and Unified Diff view"
-          >
-            <Columns2 size={12} />
-            <span>{viewMode === 'side-by-side' ? 'Split' : 'Unified'}</span>
-          </button>
-
-          {/* Whitespace Toggle */}
-          <button
-            type="button"
-            onClick={() => setIgnoreWhitespace((prev) => !prev)}
-            className={cn(
-              'font-mono text-[11px] px-2 py-1 rounded border transition-colors cursor-pointer',
-              ignoreWhitespace
-                ? 'border-primary/40 bg-primary/10 text-primary font-semibold'
-                : 'border-border bg-card/60 text-muted-foreground hover:bg-accent hover:text-foreground'
-            )}
-            title="Ignore whitespace changes in diff comparison"
-          >
-            Trim WS: {ignoreWhitespace ? 'ON' : 'OFF'}
-          </button>
-
-          {/* Diff Engine Switcher */}
-          <button
-            type="button"
-            onClick={() => setEngine((prev) => (prev === 'monaco' ? 'fallback' : 'monaco'))}
-            className="inline-flex items-center gap-1 font-mono text-[11px] px-2 py-1 rounded border border-border bg-card/60 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            title="Toggle between Monaco Diff Editor and Lightweight Fallback"
-          >
-            <Code2 size={12} />
-            <span>{engine === 'monaco' ? 'Monaco' : 'Fallback'}</span>
-          </button>
-
-          {/* External Launcher: Open in Desktop Editor Diff */}
-          <button
-            type="button"
-            onClick={async () => {
-              const ok = await launchVsCodeDiff(repoPath, filePath, defaultEditor);
-              if (ok) {
-                showToast?.(`Opened ${filePath} in ${editorLabel} diff`, 'success');
-              } else {
-                openInVsCodeAtLine(repoPath, filePath, 1, 1, defaultEditor);
-                showToast?.(`Opened ${filePath} in ${editorLabel}`, 'info');
-              }
-            }}
-            className="inline-flex items-center gap-1 font-mono text-[11px] px-2 py-1 rounded border border-border bg-card/60 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            title={`Open file in desktop ${editorLabel} Diff`}
-          >
-            <ExternalLink size={12} />
-            <span className="hidden sm:inline">{editorLabel}</span>
-          </button>
+          <Menu>
+            <MenuTrigger className={toolbarButton} aria-label="More diff options" title="More diff options">
+              <MoreHorizontal className="size-3.5" />
+            </MenuTrigger>
+            <MenuPopup align="end" className="w-64">
+              <MenuCheckboxItem checked={ignoreWhitespace} onCheckedChange={(checked) => setIgnoreWhitespace(Boolean(checked))}>Ignore whitespace</MenuCheckboxItem>
+              <MenuCheckboxItem checked={engine === 'fallback'} onCheckedChange={(checked) => setEngine(checked ? 'fallback' : 'monaco')}>Plain patch view</MenuCheckboxItem>
+              <MenuSeparator />
+              <MenuItem onClick={() => setSymbolsOpen((open) => !open)}>
+                <ListTree />Symbols in this file{displayedSymbols.length ? ` (${displayedSymbols.length})` : ''}
+              </MenuItem>
+              {currentHunk && (
+                <MenuItem onClick={() => {
+                  openInVsCodeAtLine(repoPath, filePath, firstChangedLine(currentHunk), 1, defaultEditor);
+                  showToast?.(`Opened ${filePath}:${firstChangedLine(currentHunk)} in ${editorLabel}`, 'success');
+                }}>
+                  <ExternalLink />Open line {firstChangedLine(currentHunk)} in {editorLabel}
+                </MenuItem>
+              )}
+              {onHunkAction && currentHunk && (
+                <>
+                  <MenuSeparator />
+                  <MenuItem onClick={() => void handleAcceptHunk()}><Check />Accept this change (a)</MenuItem>
+                  <MenuItem onClick={() => void handleRejectHunk()}><X />Reject this change (r)</MenuItem>
+                </>
+              )}
+            </MenuPopup>
+          </Menu>
         </div>
       </div>
-
-      {/* ─── CHANGE SECTION TABS NAVIGATION ───────────────────────────────────── */}
-      {hunks.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-1.5 px-3 py-1.5 border-b border-border/60 bg-muted/15 text-xs select-none">
-          <div
-            ref={tabsContainerRef}
-            role="tablist"
-            aria-label="Change sections"
-            className="flex items-center gap-1 min-w-[130px] flex-1 overflow-x-auto py-0.5"
-          >
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mr-1 shrink-0">
-              Changes ({hunks.length}):
-            </span>
-            {hunks.map((h, i) => {
-              const adds = h.lines ? h.lines.filter(l => l.startsWith('+') && !l.startsWith('+++')).length : 0;
-              const dels = h.lines ? h.lines.filter(l => l.startsWith('-') && !l.startsWith('---')).length : 0;
-              const isSelected = i === activeHunkIndex;
-              return (
-                <button
-                  key={h.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={isSelected}
-                  data-active-tab={isSelected ? 'true' : undefined}
-                  onClick={() => handleSelectHunk(i)}
-                  className={cn(
-                    'px-2 py-0.5 rounded text-[11px] font-mono transition-colors cursor-pointer border whitespace-nowrap shrink-0',
-                    isSelected
-                      ? 'bg-primary text-primary-foreground border-primary font-semibold shadow-xs'
-                      : 'bg-card/70 text-muted-foreground hover:text-foreground hover:bg-accent border-border/60'
-                  )}
-                  title={`Jump to change section #${i + 1}: line ${h.startLineModified}${h.enclosingDeclaration ? ` (${h.enclosingDeclaration})` : ''}`}
-                >
-                  <span>Section {i + 1}</span>
-                  {(adds > 0 || dels > 0) && (
-                    <span className="ml-1 text-[9px] opacity-80">
-                      {adds > 0 && <span className="text-success-foreground">+{adds}</span>}
-                      {dels > 0 && <span className="text-destructive-foreground">-{dels}</span>}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-1 shrink-0 ml-auto">
-            <button
-              type="button"
-              disabled={activeHunkIndex <= 0 && !onPrevFile}
-              onClick={handlePrevHunk}
-              className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-mono border border-border bg-card/60 hover:bg-accent disabled:opacity-35 transition-colors cursor-pointer"
-              title={activeHunkIndex <= 0 && onPrevFile ? 'Previous file' : 'Previous change section (k / p)'}
-              aria-label={activeHunkIndex <= 0 && onPrevFile ? 'Previous file' : 'Previous section'}
-            >
-              <ChevronLeft size={12} />
-              <span>{activeHunkIndex <= 0 && onPrevFile ? 'Prev File' : 'Prev'}</span>
-            </button>
-            <button
-              type="button"
-              disabled={activeHunkIndex >= hunks.length - 1 && !onNextFile}
-              onClick={handleNextHunk}
-              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-mono font-medium border border-primary/50 bg-primary/15 text-primary hover:bg-primary/25 disabled:opacity-35 transition-colors cursor-pointer shadow-2xs"
-              title={activeHunkIndex >= hunks.length - 1 && onNextFile ? 'Next file' : 'Next change section (j / n)'}
-              aria-label={activeHunkIndex >= hunks.length - 1 && onNextFile ? 'Next file' : 'Next section'}
-            >
-              <span>{activeHunkIndex >= hunks.length - 1 && onNextFile ? 'Next File' : 'Next Section'}</span>
-              <ChevronRight size={12} />
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* ─── CHANGESET SYMBOL EXPLORER DRAWER ─────────────────────────────────── */}
       {symbolsOpen && (
@@ -472,7 +437,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
           <ChangesetSymbolNavigator
             symbols={displayedSymbols}
             activeFilePath={filePath}
-            activeLine={targetLine || (currentHunk ? currentHunk.startLineModified : undefined)}
+            activeLine={realTargetLine || (currentHunk ? currentHunk.startLineModified : undefined)}
             editorLabel={editorLabel}
             onSelectSymbol={handleSymbolSelect}
             onOpenInVsCode={(s) => {
@@ -485,7 +450,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
       )}
 
       {/* ─── CENTER DIFF CANVAS ──────────────────────────────────────────────── */}
-      <div className={cn('bg-background/50', fillContainer ? 'flex-1 min-h-0 p-1 flex flex-col' : 'p-2')}>
+      <div className={cn(fillContainer ? 'flex min-h-0 flex-1 flex-col' : 'p-2')}>
         {engine === 'monaco' ? (
           <Suspense fallback={<div role="status" className="p-4 text-xs text-muted-foreground">Loading diff editor…</div>}>
           <MonacoDiffAdapter
@@ -498,7 +463,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             viewMode={viewMode}
             ignoreWhitespace={ignoreWhitespace}
             height={fillContainer ? '100%' : 460}
-            targetLine={targetLine}
+            targetLine={monacoTargetLine}
             jumpNonce={jumpNonce}
             onOpenFile={onOpenFile}
             onLineSelect={handleLineSelect}
@@ -513,120 +478,12 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
             patchText={patchText}
             viewMode={viewMode}
             ignoreWhitespace={ignoreWhitespace}
-            targetLine={targetLine}
+            targetLine={fallbackTargetLine}
+            targetOrigLine={fallbackTargetOrigLine}
             jumpNonce={jumpNonce}
           />
         )}
       </div>
-
-      {/* ─── BOTTOM HUNK TRIAGE BAR ─────────────────────────────────────────── */}
-      {hunks.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-t border-border/60 bg-muted/15 text-xs select-none">
-          {/* Hunk Navigator Controls */}
-          <div className="flex items-center gap-1.5 font-mono text-[11px]">
-            <button
-              type="button"
-              disabled={activeHunkIndex <= 0}
-              onClick={handlePrevHunk}
-              className="p-1 rounded border border-border bg-card/60 hover:bg-accent disabled:opacity-35 transition-colors cursor-pointer"
-              title="Previous hunk (Shortcut: k)"
-            >
-              <ChevronLeft size={13} />
-            </button>
-
-            <span className="px-1.5 text-muted-foreground">
-              Hunk <strong className="text-foreground">{activeHunkIndex + 1}</strong> of {hunks.length}
-              {currentHunk && (
-                <span className="text-[10px] text-muted-foreground ml-1">
-                  (Orig L{currentHunk.startLineOriginal} → Mod L{currentHunk.startLineModified})
-                </span>
-              )}
-            </span>
-
-            <button
-              type="button"
-              disabled={activeHunkIndex >= hunks.length - 1}
-              onClick={handleNextHunk}
-              className="p-1 rounded border border-border bg-card/60 hover:bg-accent disabled:opacity-35 transition-colors cursor-pointer"
-              title="Next hunk (Shortcut: j)"
-            >
-              <ChevronRight size={13} />
-            </button>
-
-            {/* Current Hunk State Badge */}
-            {currentHunk && hunkStates[currentHunk.id] && (
-              <span
-                className={cn(
-                  'font-mono text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ml-1 border',
-                  hunkStates[currentHunk.id] === 'accepted'
-                    ? 'border-emerald-500/30 bg-emerald-500/15 text-success-foreground'
-                    : hunkStates[currentHunk.id] === 'rejected'
-                      ? 'border-rose-500/30 bg-rose-500/15 text-destructive-foreground'
-                      : 'border-amber-500/30 bg-amber-500/15 text-warning-foreground'
-                )}
-              >
-                {hunkStates[currentHunk.id]}
-              </span>
-            )}
-          </div>
-
-          {/* Triage Action Buttons & VS Code Line Jump */}
-          <div className="flex items-center gap-2">
-            {/* Open Active Hunk in Editor at Line */}
-            {currentHunk && (
-              <button
-                type="button"
-                onClick={() => {
-                  openInVsCodeAtLine(repoPath, filePath, currentHunk.startLineModified, 1, defaultEditor);
-                  showToast?.(`Opened ${filePath}:${currentHunk.startLineModified} in ${editorLabel}`, 'success');
-                }}
-                className="inline-flex items-center gap-1 font-mono text-[10px] px-2 py-1 rounded border border-border bg-card/60 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                title={`Open in desktop ${editorLabel} at modified line ${currentHunk.startLineModified}`}
-              >
-                <ExternalLink size={11} />
-                <span>{editorLabel} :L{currentHunk.startLineModified}</span>
-              </button>
-            )}
-
-            {/* Accept Hunk */}
-            {onHunkAction && <>
-            <button
-              type="button"
-              onClick={() => void handleAcceptHunk()}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-success-foreground border border-emerald-500/30 transition-colors cursor-pointer shadow-2xs"
-              title="Accept this hunk (Shortcut: a)"
-            >
-              <Check size={12} />
-              <span>Accept (a)</span>
-            </button>
-
-            {/* Reject Hunk */}
-            <button
-              type="button"
-              onClick={() => void handleRejectHunk()}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-rose-500/15 hover:bg-rose-500/25 text-destructive-foreground border border-rose-500/30 transition-colors cursor-pointer shadow-2xs"
-              title="Reject this hunk (Shortcut: r)"
-            >
-              <X size={12} />
-              <span>Reject (r)</span>
-            </button>
-
-            {/* Request Refine */}
-            </>}
-            {onRequestRefine &&
-            <button
-              type="button"
-              onClick={handleOpenRefineModal}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-amber-500/15 hover:bg-amber-500/25 text-warning-foreground border border-amber-500/30 transition-colors cursor-pointer shadow-2xs"
-              title="Prepare refinement instructions in AI chat"
-            >
-              <RefreshCw size={11} />
-              <span>Refine</span>
-            </button>
-            }
-          </div>
-        </div>
-      )}
 
       {/* ─── REFINE PROMPT MODAL ────────────────────────────────────────────── */}
       {refineModalOpen && (
@@ -636,7 +493,7 @@ export const PluggableDiffViewer: React.FC<PluggableDiffViewerProps> = ({
               <div className="flex items-center gap-2">
                 <MessageSquare size={16} className="text-primary" />
                 <h3 className="text-xs font-bold text-foreground">
-                  Request Refinement for Hunk #{activeHunkIndex + 1}
+                  Refine change {activeHunkIndex + 1} of {filePath.split('/').at(-1)}
                 </h3>
               </div>
               <button

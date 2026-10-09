@@ -44,7 +44,9 @@ export default defineConfig({
   },
   build: {
     outDir: '../dist/gui',
-    emptyOutDir: false,
+    // The output folder is outside the project root, so Vite only empties it when told to.
+    // Left alone, every build adds new hashed chunks beside the old ones, and `dist` ships in the npm package.
+    emptyOutDir: true,
     rollupOptions: {
       output: {
         manualChunks(id) {

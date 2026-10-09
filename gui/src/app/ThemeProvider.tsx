@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { THEME_STORAGE_KEY as STORAGE_KEY, LEGACY_THEME_STORAGE_KEY as LEGACY_STORAGE_KEY, COLOR_THEME_STORAGE_KEY as COLOR_STORAGE_KEY } from '../brand.js';
 
 export type Theme = 'light' | 'dark';
-export type ColorTheme = 'sunset' | 'aurora' | 'forest' | 'nebula' | 'glacier';
+export type ColorTheme = 'sunset' | 'dusk' | 'aurora' | 'forest' | 'nebula' | 'glacier';
 
 export interface ColorThemeDefinition {
   readonly id: ColorTheme;
@@ -19,6 +19,13 @@ export const COLOR_THEMES: readonly ColorThemeDefinition[] = [
     favicon: '/favicon.svg',
     dotClass: 'bg-gradient-to-r from-amber-400 to-rose-500',
     description: 'ContextSpace classic warm twilight',
+  },
+  {
+    id: 'dusk',
+    label: 'Dusk',
+    favicon: '/favicon.svg',
+    dotClass: 'bg-gradient-to-r from-orange-400 via-rose-500 to-indigo-950',
+    description: 'Obsidian twilight where progress is the logo ring',
   },
   {
     id: 'aurora',

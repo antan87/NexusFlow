@@ -121,10 +121,19 @@ Whichever AI harness you use, **the agent's very first instructions** are to:
 ### 5. Orchestrate Local Services
 You don't need to open five terminal windows to start your backend, frontend, databases, or libraries.
 
+**Declare what runs.** Add a `Procfile.dev` (or `Procfile`) at a repository root, one long-running process per line:
+
+```
+web: npm run dev
+worker: node worker.js
+```
+
+ContextSpace runs each line through the shell from that repository. As with foreman and honcho, each process gets `PORT` (5000, 5100, … in file order; another repository's Procfile gets the next block of 1000), and a `release:` line is skipped. `.env` is not loaded; load it in the command if you need it (`set -a; . ./.env; set +a; npm run dev`). A `Procfile.dev` that declares nothing falls back to the `Procfile`, and a Procfile at the workspace root declares processes too. Without a Procfile it guesses from project files (`package.json` `dev`/`start`/`serve`, `.csproj`, Django, FastAPI/Flask, `go.mod`, Makefile `dev`/`run`). Guessed services are labelled, can be started one at a time, and are never started by **Start declared services**. The Services tab suggests a `Procfile.dev` built from the guesses: review it, keep only processes that should run while you work, save it, and press **Rescan**.
+
 **On the Web Dashboard:**
-* Expand your active workspace to see all detected services (e.g. node scripts, dotnet servers, python hosts).
-* Click **Start All** to spin them up.
-* View aggregate console streams inside the tabbed retro-terminal output screen.
+* Open **Run → Services** in your workspace to see declared and guessed services.
+* Click **Start declared services** to start them. A service that cannot start keeps its reason beside it: a missing program, an occupied port, or the last line it wrote before stopping.
+* View each service's log stream in the console beside the list.
 
 **Via the CLI:**
 * Navigate to your workspace directory and run:
@@ -183,7 +192,7 @@ Here is a summary of the command-line interface:
 | **`ctxspace quick`** | `ctxspace quick` | Fast-tracks instant workspace creation for quick bug fixes. |
 | **`ctxspace list`** | `ctxspace list` / `ctxspace ls` | Lists all active feature workspaces, tagging in-place ones with `[in-place]`. |
 | **`ctxspace open`** | `ctxspace open` | Prompts you to pick an active workspace and opens it in your editor. |
-| **`ctxspace start`** | `ctxspace start [path]` | Starts background processes for all projects in the workspace. |
+| **`ctxspace start`** | `ctxspace start [path]` | Starts the processes the workspace's repositories declare in `Procfile.dev`/`Procfile`; asks before starting guessed ones. |
 | **`ctxspace stop`** | `ctxspace stop [path]` | Kills all running processes for the workspace. |
 | **`ctxspace logs`** | `ctxspace logs [path] [-n <lines>]` | Tails output log files for all service processes in the workspace. |
 | **`ctxspace status`** | `ctxspace status [path]` | Displays live repo state, context freshness, and service status. |

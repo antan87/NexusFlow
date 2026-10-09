@@ -34,7 +34,7 @@ export interface NexusFlowConfig {
   workspacesDir: string;
 
   /** The user's preferred AI assistant, or null if none chosen yet. */
-  defaultAssistant: AIAssistant | null;
+  defaultAssistant: SessionAssistant | null;
 
   /** The user's preferred editor command, or null if none chosen yet. */
   defaultEditor?: string | null;
@@ -67,7 +67,7 @@ export interface NexusFlowConfig {
 /** Result of probing for an AI assistant on the system. */
 export interface DetectedAI {
   /** Canonical assistant identifier. */
-  name: AIAssistant;
+  name: SessionAssistant;
 
   /** Human-readable label shown in prompts. */
   displayName: string;
@@ -293,7 +293,7 @@ export interface Feature {
   createdBranches?: Record<string, string>;
 
   /** AI assistants enabled for this feature workspace. */
-  assistants: AIAssistant[];
+  assistants: SessionAssistant[];
 
   /** Absolute path to the workspace directory on disk. */
   workspacePath: string;
@@ -571,7 +571,34 @@ export interface ServiceConfig {
   /** Optional port the service listens on. */
   port?: number;
   /** How the start command was detected. */
-  source: 'package.json' | 'dotnet' | 'docker-compose' | 'aspire' | 'python' | 'go' | 'makefile' | 'manual';
+  source: 'package.json' | 'dotnet' | 'docker-compose' | 'aspire' | 'python' | 'go' | 'makefile' | 'manual' | 'procfile';
+  /**
+   * True when the repository declares this process (a `Procfile.dev` or
+   * `Procfile` line). Everything else is guessed from project files; guessed
+   * services can be started one at a time but never by Start All.
+   */
+  declared?: boolean;
+  /** The file and 1-based line that declared this service. */
+  declaredIn?: { file: string; line: number };
+  /** The command as written, for display (a Procfile line runs through the shell). */
+  display?: string;
+  /** Environment set for this process only, such as the PORT a Procfile line is given. */
+  env?: Record<string, string>;
+}
+
+/** Why a service did not start or stopped unexpectedly, kept beside its logs until the next action. */
+export interface ServiceFailure {
+  name: string;
+  reason: string;
+  at: string;
+}
+
+/** Outcome of starting one service. */
+export interface ServiceStartResult {
+  name: string;
+  status: 'running' | 'failed';
+  pid?: number;
+  reason?: string;
 }
 
 /** Detected orchestration tool in a workspace. */
@@ -615,6 +642,8 @@ export interface RunningService {
   config: ServiceConfig;
   /** Timestamp when started. */
   startedAt: string;
+  /** Its log file, so an unexpected stop can quote the last line it wrote. */
+  logFile?: string;
 }
 
 /** State file saved to track running services. */
@@ -642,6 +671,8 @@ export interface RunningState {
    * (docker compose up -d) have no PID for the services filter to verify.
    */
   orchestrators?: RunningOrchestrator[];
+  /** The latest failure per service, cleared when it starts or is stopped. */
+  failures?: ServiceFailure[];
   /** Timestamp when the state was last updated. */
   updatedAt: string;
 }
@@ -765,6 +796,16 @@ export interface LifecycleStep {
   lastVerificationSha?: string;
   lastVerificationStatus?: VerificationStatus;
   completedAt?: string;
+  /** Set while a finished milestone has been sent back for rework. Cleared when it completes again. */
+  reopenedAt?: string;
+  /** Why the milestone was reopened, in the words of whoever reopened it. */
+  reopenReason?: string;
+  reopenedBy?: 'user' | 'agent';
+  /** How many times this milestone has been reopened. Survives completion. */
+  reopenCount?: number;
+  /** Set while the milestone is blocked on something outside the work itself. Cleared when it is started again. */
+  blockedReason?: string;
+  blockedAt?: string;
 }
 
 /** Information about sister branches and collaborator commits tracked in the workspace. */

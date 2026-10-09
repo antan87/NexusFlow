@@ -263,9 +263,12 @@ export function isSensitiveFile(filePath: string): boolean {
  * @param repoPath - Absolute path to the repo root.
  * @returns Status information including changed file list and summary string.
  */
-export async function getRepoStatus(repoPath: string): Promise<RepoStatus> {
+export async function getRepoStatus(repoPath: string, options: { readOnly?: boolean } = {}): Promise<RepoStatus> {
   try {
-    const { stdout } = await execa('git', ['status', '--porcelain', '-z', '-uall'], {
+    // readOnly: background checks must not rewrite the index or take
+    // index.lock while the user runs git.
+    const args = [...(options.readOnly ? ['--no-optional-locks'] : []), 'status', '--porcelain', '-z', '-uall'];
+    const { stdout } = await execa('git', args, {
       cwd: repoPath,
     });
 

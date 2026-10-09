@@ -40,12 +40,22 @@ head. Green checks on an earlier commit do not establish readiness for a newer o
 Pending checks, unresolved blocking findings, and missing required approvals must be
 reported as outstanding. No review submitted is different from an approved review.
 
-When a request chains push, merge and release, name every PR to merge and every
-release dispatch, and confirm each one. A dependent PR, such as a version bump, needs
-its own authorization. Harness safety checks may block a merge the user did not name;
-stop and ask rather than trying another route. For a gated release, dispatch only after
-required checks succeed on the exact merge commit, because merging anything else first
-moves the release source.
+When the owner's request includes release, such as "review it, and if it is good, make a
+PR, merge and release", that request authorizes the whole chain for this change: the
+PR, its merge once the required checks are green and your review found nothing blocking,
+and the release through the repository's own release path. Use the repository's one-command
+release when it has one (in ContextSpace's own repository that is `npm run release:ship`,
+which makes the version-bump PR, merges it, dispatches and verifies). Do not ask again for
+each PR or dispatch, and do not hand the owner steps the release command does itself. Ask
+only about what the request leaves open: which change is meant, a major version, a failing
+check, a paused repository, or a release PR that is not a plain version bump. The
+authorization covers this change, not someone else's PR or a release the owner did not ask for.
+
+Harness safety checks may block a merge or a release the user did not name; stop and ask
+rather than trying another route. Never approve or cancel another run's release
+environment gate, and never change release settings or the repository's release brake
+(in ContextSpace's own repository, the `RELEASES_PAUSED` variable): that is the owner's
+control. Release only after required checks succeed on the exact commit.
 
 An assessment or push request does not itself authorize merging or publishing.
 When those actions are requested, perform the applicable checks first and verify

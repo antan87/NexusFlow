@@ -104,7 +104,7 @@ test.describe('reviewed commit', () => {
 
     await panel.getByLabel('Commit message').fill('feat: reviewed');
     await panel.getByRole('button', { name: 'Commit & push selected' }).click();
-    await expect(page.getByText('Commit & Push Results')).toBeVisible();
+    await expect(page.getByText('Commit results', { exact: true })).toBeVisible();
     expect(body).toEqual({ message: 'feat: reviewed', noPush: false, files: { api: ['src/a.ts'], web: ['page.tsx'] } });
     await expect(page.getByText(/aaa1111\) on feat\/deliver, pushed/)).toBeVisible();
   });
@@ -147,6 +147,7 @@ test('prepare for editing previews path, branch and base before creating anythin
     await route.fulfill({ json: request.dryRun ? plan : { success: true, ...plan } });
   });
   await page.goto('/#/workspaces/deliver/changes');
+  await page.getByRole('button', { name: /^Show repositories and branches for/ }).click();
   await page.getByRole('button', { name: 'Prepare docs for editing', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Prepare docs for editing' });
   await expect(dialog.getByTestId('prepare-plan')).toContainText('/ws/deliver/docs');
@@ -168,6 +169,7 @@ test('a path collision is shown and cannot be confirmed', async ({ page }) => {
     alreadyIsolated: false, conflicts: ['A folder already exists at /ws/deliver/docs. Move or remove it first.'],
   } }));
   await page.goto('/#/workspaces/deliver/changes');
+  await page.getByRole('button', { name: /^Show repositories and branches for/ }).click();
   await page.getByRole('button', { name: 'Prepare docs for editing', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Prepare docs for editing' });
   await expect(dialog.getByRole('alert')).toContainText('A folder already exists');

@@ -91,6 +91,8 @@ export function registerTerminalRoutes(app: Hono, upgrade: UpgradeWebSocket<any,
     if (!root) throw new Error('Workspace not found.');
     return root;
   };
+  // Every running terminal of this browser, across workspaces: the sidebar says where each CLI is from this.
+  app.post('/api/terminals/running', c => c.json({ sessions: manager.running(getCookie(c, COOKIE)!) }));
   app.post('/api/terminals/:workspace/status', async c => {
     try {
       const id = c.req.param('workspace'); await rootFor(id);

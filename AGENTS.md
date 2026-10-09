@@ -36,3 +36,18 @@ repository file; doing so leaves stale guidance on later feature branches.
   and generated-context changes.
 - Preserve unrelated working-tree changes and use explicit pathspecs for Git
   staging or commits.
+
+## Releasing
+
+- Release with `npm run release:ship` (details in `RELEASING.md`). It does the whole
+  path from GitHub's own state: version-bump PR, merge, pinned dispatch, verification.
+  Several agents can run it at once and join one release instead of racing.
+  `--dry-run` shows the next step and changes nothing.
+- An instruction to release a change authorizes running it for that change. Do not ask
+  for each PR or dispatch. Stop and ask only when it stops: a breaking change that needs
+  `--bump major`, a failing check, a paused repository, or a release PR that is not a
+  plain version bump.
+- Never dispatch a version that already has a release run, tag or GitHub Release,
+  and never approve or cancel another run's `release` environment gate (the command
+  approves nothing). Never change release settings or the `RELEASES_PAUSED` variable:
+  it is the owner's brake. `npm run release:preflight` remains the read-only manual check.

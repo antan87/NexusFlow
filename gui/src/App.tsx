@@ -11,13 +11,18 @@ import { VsCodeShell } from './app/VsCodeShell.js';
 import { SetupPage } from './features/setup/SetupPage.js';
 import { folderErrors, saveConfig as postConfig, type ConfigPathsReport } from './features/setup/setupApi.js';
 import { TranscriptDialog } from './features/sessions/TranscriptDialog.js';
-import { FloatingChatModal } from './features/chat/FloatingChatModal.js';
-import { FloatingChatLauncher } from './features/chat/FloatingChatLauncher.js';
+import { ChatDock } from './features/chat/ChatDock.js';
+import { ChatHome } from './features/chat/ChatHome.js';
+import { ChatAttentionCards } from './features/chat/ChatAttentionCards.js';
 import { DeleteWorkspaceDialog } from './components/DeleteWorkspaceDialog.js';
 import { ArchiveWorkspaceDialog } from './components/ArchiveWorkspaceDialog.js';
 import { Spinner } from './components/ui/spinner.js';
 import { safeCopyToClipboard } from './lib/clipboard.js';
 import { cn } from './lib/utils.js';
+import { perfMark, perfMarkOnce } from './lib/perfMarks.js';
+import { changesFromResponse } from './features/changes/utils/changesResponse.js';
+import { parseSection, type WorkspaceSection } from './features/workspace-shell/destinations.js';
+import { useWorkspaceShortcuts } from './features/workspace-shell/useWorkspaceShortcuts.js';
 
 // Route-level code splitting: each page (and its dependency subtree, e.g. the
 // markdown pipeline under WorkspacesPage) loads on first navigation instead of
@@ -71,6 +76,28 @@ import {
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
 const nativeUpdateBridge = typeof window !== 'undefined' ? (window.contextspaceBridge?.updates || window.nexusBridge?.updates) : undefined;
 let toastIdCounter = 0;
+
+/**
+ * Starts a load of one kind of workspace data, aborting the previous load of
+ * that kind so a slow response cannot land after a newer one.
+ */
+function beginWorkspaceLoad(loads: Map<string, AbortController>, kind: string): AbortSignal {
+  loads.get(kind)?.abort();
+  const controller = new AbortController();
+  loads.set(kind, controller);
+  return controller.signal;
+}
+
+/** The last changes, sessions and plan shown for a workspace. */
+interface RecentWorkspaceData { changes?: any[]; sessions?: AISession[]; plan?: string }
+const RECENT_WORKSPACE_DATA_LIMIT = 16;
+
+function rememberWorkspaceData(recent: Map<string, RecentWorkspaceData>, wsId: string, data: RecentWorkspaceData): void {
+  const merged = { ...recent.get(wsId), ...data };
+  recent.delete(wsId);
+  recent.set(wsId, merged);
+  if (recent.size > RECENT_WORKSPACE_DATA_LIMIT) recent.delete(recent.keys().next().value!);
+}
 
 type UiUpdateStatus = {
   currentVersion: string;
@@ -165,6 +192,8 @@ function AppInner() {
   const onStatusRoute = ['/', '/overview', '/dashboard'].includes(location.pathname) || location.pathname.startsWith('/workspaces');
   const queryClient = useQueryClient();
   const workspacesQuery = useWorkspaces();
+  useWorkspaceShortcuts();
+  useEffect(() => { if (config) perfMarkOnce('cs:shell'); }, [config]);
   const statusesQuery = useWorkspacesStatus({
     enabled: configExists && !configLoading && onStatusRoute,
     intervalMs: onStatusRoute && (workspacesQuery.data?.length ?? 0) <= 24 ? 15_000 : false,
@@ -186,14 +215,13 @@ function AppInner() {
   const statusesComplete = !statusesQuery.isLoading && !statusesQuery.hasNextPage && !statusesQuery.isError;
 
   const [activeWsId, setActiveWsId] = useState<string | null>(null);
-  const [subTab, setSubTab] = useState<'overview' | 'plan' | 'documents' | 'changes' | 'services' | 'sessions' | 'knowledge' | 'skills'>('overview');
+  const [subTab, setSubTab] = useState<WorkspaceSection>('chat');
   const [sessions, setSessions] = useState<AISession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [activeSession, setActiveSession] = useState<AISession | null>(null);
   const [transcript, setTranscript] = useState<TranscriptMessage[]>([]);
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [gitChanges, setGitChanges] = useState<any[]>([]);
-  const [gitChangesLoading, setGitChangesLoading] = useState(false);
   const [knowledgeContent, setKnowledgeContent] = useState<string>('');
   const [knowledgeLoading, setKnowledgeLoading] = useState<boolean>(false);
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
@@ -208,6 +236,11 @@ function AppInner() {
   const knowledgeLoadRequestRef = useRef(0);
   const planLoadRequestRef = useRef(0);
   const saveKnowledgeRequestRef = useRef(0);
+  // One in-flight load per kind of workspace data; see beginWorkspaceLoad.
+  const workspaceLoadsRef = useRef(new Map<string, AbortController>());
+  // Switching back to a recent workspace shows its last data at once while a
+  // fresh load runs, instead of an empty view until every request returns.
+  const recentWorkspaceDataRef = useRef(new Map<string, RecentWorkspaceData>());
   const editedKnowledgeRef = useRef('');
   const isEditingKnowledgeRef = useRef(false);
   const [syncLoading, setSyncLoading] = useState<boolean>(false);
@@ -508,30 +541,39 @@ function AppInner() {
   };
 
   const fetchGitChanges = async (wsId: string) => {
-    setGitChangesLoading(true);
+    const signal = beginWorkspaceLoad(workspaceLoadsRef.current, 'changes');
+    const isCurrent = () => !signal.aborted && activeWorkspaceRef.current === wsId;
     try {
       const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/changes`);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/changes`, { signal });
       const data = await res.json();
-      setGitChanges(data.changes || []);
+      perfMark('cs:ws-data', { id: wsId, kind: 'changes', applied: isCurrent() });
+      if (!isCurrent()) return;
+      // A failed reply keeps the list on screen; it must not read as "no changes".
+      const changes = changesFromResponse<any>(res, data);
+      setGitChanges(changes);
+      rememberWorkspaceData(recentWorkspaceDataRef.current, wsId, { changes });
     } catch (e) {
-      console.error(e);
-    } finally {
-      setGitChangesLoading(false);
+      if (isCurrent()) console.error(e);
     }
   };
 
   const fetchWorkspaceSessions = async (wsId: string) => {
+    const signal = beginWorkspaceLoad(workspaceLoadsRef.current, 'sessions');
+    const isCurrent = () => !signal.aborted && activeWorkspaceRef.current === wsId;
     setSessionsLoading(true);
     try {
       const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/sessions`);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/sessions`, { signal });
       const data = await res.json();
+      perfMark('cs:ws-data', { id: wsId, kind: 'sessions', applied: isCurrent() });
+      if (!isCurrent()) return;
       setSessions(data.sessions || []);
+      rememberWorkspaceData(recentWorkspaceDataRef.current, wsId, { sessions: data.sessions || [] });
     } catch (e) {
-      console.error(e);
+      if (isCurrent()) console.error(e);
     } finally {
-      setSessionsLoading(false);
+      if (isCurrent()) setSessionsLoading(false);
     }
   };
 
@@ -554,11 +596,12 @@ function AppInner() {
     const isCurrentRequest = () =>
       activeWorkspaceRef.current === wsId && knowledgeLoadRequestRef.current === requestId;
 
+    const signal = beginWorkspaceLoad(workspaceLoadsRef.current, 'knowledge');
     setKnowledgeLoading(true);
     setKnowledgeError(null);
     try {
       const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/knowledge`);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/knowledge`, { signal });
       if (!res.ok) throw new Error('knowledge request failed');
       const data: unknown = await res.json();
       if (!data || typeof data !== 'object' || typeof (data as { content?: unknown }).content !== 'string') {
@@ -633,19 +676,22 @@ function AppInner() {
     const isCurrentRequest = () =>
       activeWorkspaceRef.current === wsId && planLoadRequestRef.current === requestId;
 
+    const signal = beginWorkspaceLoad(workspaceLoadsRef.current, 'plan');
     setPlanLoading(true);
     setPlanError(null);
     try {
       const encodedId = encodeURIComponent(wsId);
-      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/plan`);
+      const res = await fetch(`${API_BASE}/api/workspace/${encodedId}/plan`, { signal });
       if (!res.ok) throw new Error('plan request failed');
       const data: unknown = await res.json();
       if (!data || typeof data !== 'object' || typeof (data as { content?: unknown }).content !== 'string') {
         throw new Error('plan response was malformed');
       }
+      perfMark('cs:ws-data', { id: wsId, kind: 'plan', applied: isCurrentRequest() });
       if (!isCurrentRequest()) return;
 
       setPlanContent((data as { content: string }).content);
+      rememberWorkspaceData(recentWorkspaceDataRef.current, wsId, { plan: (data as { content: string }).content });
       setPlanError(null);
     } catch (e) {
       if (!isCurrentRequest()) return;
@@ -681,7 +727,15 @@ function AppInner() {
     assistant: string,
   ): Promise<boolean> => {
     if (assistant !== 'codex') {
-      const cmd = assistant === 'claude' ? `claude --resume ${sessionId}` : `agy --conversation ${sessionId}`;
+      const cmd = assistant === 'claude'
+        ? `claude --resume ${sessionId}`
+        : assistant === 'copilot'
+          ? `copilot --resume ${sessionId}`
+          : assistant === 'cursor'
+            ? `cursor-agent --resume ${sessionId}`
+            : assistant === 'pi'
+              ? `pi --session ${sessionId}`
+              : `agy --conversation ${sessionId}`;
       await safeCopyToClipboard(cmd);
       showToast(`Copied ${assistant} resume command to clipboard:\n\n${cmd}`, 'info');
       return true;
@@ -757,10 +811,11 @@ function AppInner() {
     const p = location.pathname;
     if (p.startsWith('/workspaces')) {
       const parts = p.split('/').filter(Boolean); // ['workspaces', id?, tab?]
+      // Choosing which chat a route opens is the chat slot's job: it tells a user's own navigation from a stale one
+      // and does not reopen a chat that was closed. Revealing it here as well would undo both.
       setActiveWsId(parts[1] ? decodeURIComponent(parts[1]) : null);
-      const tab = parts[2];
-      const valid = ['overview', 'plan', 'documents', 'changes', 'services', 'sessions', 'knowledge', 'skills'];
-      setSubTab((tab && valid.includes(tab) ? tab : 'overview') as typeof subTab);
+      // One list of sections, shared with the workspace navigation: no section opens the chat.
+      setSubTab(parseSection(parts[2]));
     } else {
       setActiveWsId(null);
     }
@@ -816,8 +871,12 @@ function AppInner() {
     knowledgeLoadRequestRef.current += 1;
     planLoadRequestRef.current += 1;
     saveKnowledgeRequestRef.current += 1;
-    setSessions([]);
-    setGitChanges([]);
+    for (const controller of workspaceLoadsRef.current.values()) controller.abort();
+    workspaceLoadsRef.current.clear();
+    const recent = activeWsId ? recentWorkspaceDataRef.current.get(activeWsId) : undefined;
+    setSessions(recent?.sessions ?? []);
+    setSessionsLoading(false);
+    setGitChanges(recent?.changes ?? []);
     setKnowledgeContent('');
     setKnowledgeError(null);
     setKnowledgeLoading(false);
@@ -827,9 +886,14 @@ function AppInner() {
     isEditingKnowledgeRef.current = false;
     setEditedKnowledge('');
     setIsEditingKnowledge(false);
-    setPlanContent('');
+    setPlanContent(recent?.plan ?? '');
     setPlanError(null);
     setPlanLoading(false);
+    if (activeWsId && recent) {
+      for (const kind of ['changes', 'sessions', 'plan'] as const) {
+        if (recent[kind] !== undefined) perfMark('cs:ws-data', { id: activeWsId, kind, applied: true, cached: true });
+      }
+    }
   }, [activeWsId]);
 
   // Load git changes for the Changes tab and the Overview (per-repo topology panel)
@@ -1038,7 +1102,7 @@ Core Instructions:
       addRepoLoading={addRepoLoading}
       handleAddRepo={handleAddRepo}
       sessionProps={{ sessions, sessionsLoading, setActiveSession, setTranscript, fetchSessionTranscript, handleOpenDesktopSession, showToast }}
-      changesProps={{ gitChanges, gitChangesLoading, syncLoading, syncResults, commitMessage, showCommitModal, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll }}
+      changesProps={{ gitChanges, syncLoading, syncResults, commitMessage, showCommitModal, commitResults, setSyncResults, setCommitResults, setCommitMessage, setShowCommitModal, fetchGitChanges, handleSyncAll }}
       knowledgeProps={{
         knowledgeContent,
         knowledgeLoading,
@@ -1095,7 +1159,8 @@ Core Instructions:
         workspaceStatuses={workspaceStatuses}
         workspacesLoading={workspacesLoading}
         activeWsId={activeWsId}
-        onSelectWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
+        onCheckForUpdates={() => { void handleCheckForUpdates(); }}
+        checkingForUpdates={['checking', 'downloading'].includes(updateStatus?.nativeStatus ?? '')}
       />
 
       {/* Main Content Area */}
@@ -1107,23 +1172,19 @@ Core Instructions:
           </div>
         ) : (
           <>
-            <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-border bg-card/50 px-3 py-2.5 text-xs">
-              <div className="min-w-0">
-                <span className="font-semibold text-foreground">Desktop updates</span>
-                {updateCheckError ? (
-                  <p className="mt-0.5 truncate text-destructive-foreground" role="alert">{updateCheckError}</p>
-                ) : (
-                  <p className="mt-0.5 text-muted-foreground">Updates are optional and never install without your confirmation.</p>
-                )}
+            {/* Checking for updates lives beside the version in the sidebar. This bar appears only when a check failed. */}
+            {updateCheckError && (
+              <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-border bg-card/50 px-3 py-2.5 text-xs">
+                <p className="min-w-0 truncate text-destructive-foreground" role="alert">Could not check for updates: {updateCheckError}</p>
+                <button
+                  onClick={handleCheckForUpdates}
+                  disabled={['checking', 'downloading'].includes(updateStatus?.nativeStatus ?? '')}
+                  className="shrink-0 rounded-md border border-border px-3 py-1.5 font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
+                >
+                  Check again
+                </button>
               </div>
-              <button
-                onClick={handleCheckForUpdates}
-                disabled={['checking', 'downloading'].includes(updateStatus?.nativeStatus ?? '')}
-                className="shrink-0 rounded-md border border-border px-3 py-1.5 font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
-              >
-                {updateCheckError ? 'Check again' : 'Check for updates'}
-              </button>
-            </div>
+            )}
             {/* Update Notification Banner. Updates are always optional: Later
                 hides the banner for this session and no native installer is
                 exposed when this dashboard is running in a browser. */}
@@ -1235,7 +1296,7 @@ Core Instructions:
               }
             >
               <Routes>
-                <Route path="/" element={dashboardPage} />
+                <Route path="/" element={<ChatHome workspaces={activeWorkspaces} loading={workspacesLoading} ready={Boolean(config)} fallback={dashboardPage} />} />
                 <Route path="/overview" element={dashboardPage} />
                 <Route path="/dashboard" element={dashboardPage} />
                 <Route path="/guide" element={guidePage} />
@@ -1297,8 +1358,8 @@ Core Instructions:
         onArchived={handleArchived}
       />
 
-      <FloatingChatModal workspaces={activeWorkspaces} />
-      <FloatingChatLauncher />
+      <ChatDock workspaces={activeWorkspaces} />
+      <ChatAttentionCards workspaces={activeWorkspaces} />
 
       <ToastStack
         toasts={toasts}

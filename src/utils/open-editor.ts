@@ -61,6 +61,13 @@ export async function openInEditor(
     : await resolveEditorTarget(editorCommand, workspacePath);
   const useShell = process.platform === 'win32';
   // With `shell: true` execa does not escape arguments; quote so spaces survive.
+  // A double quote (or line break) would end that quoting and let cmd.exe run
+  // whatever follows it, and cmd.exe expands %NAME% even inside quotes, so the
+  // path would no longer be the one that was checked. Refuse to build the
+  // command at all. A lone % (or a pair with spaces between) is not an expansion.
+  if (useShell && /["\0\r\n]|%[^%\s]+%/.test(target)) {
+    throw new Error('Refusing to launch the editor: the path contains characters that are unsafe for the Windows shell.');
+  }
   const arg = useShell ? `"${target}"` : target;
   await execa(editorCommand, [arg], { stdio: 'ignore', shell: useShell, windowsHide: true });
 }

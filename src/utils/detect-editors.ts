@@ -3,7 +3,7 @@
  * Detects which code editors are available on the system.
  */
 
-import { execa } from 'execa';
+import { probeCommand } from './probe.js';
 
 import type { DetectedEditor } from '../types.js';
 
@@ -32,16 +32,13 @@ async function commandExists(command: string): Promise<boolean> {
       return true;
     }
   }
-  try {
-    const result = await execa(command, ['--version'], {
-      reject: false,
-      shell: process.platform === 'win32',
-      windowsHide: true,
-    });
-    return result.exitCode === 0;
-  } catch {
-    return false;
-  }
+  const outcome = await probeCommand(command, ['--version'], {
+    shell: process.platform === 'win32',
+    windowsHide: true,
+  });
+  // A command that starts but does not answer in time is installed; it just
+  // could not report a version (for example a snap on its first run).
+  return outcome !== 'failed';
 }
 
 /**
@@ -50,7 +47,29 @@ async function commandExists(command: string): Promise<boolean> {
  *
  * @returns An array of {@link DetectedEditor} results, one per editor.
  */
-export async function detectEditors(): Promise<DetectedEditor[]> {
+// Editor detection starts one process per candidate, and the GUI asks for it
+// from two endpoints at startup. Share one run and reuse it briefly; the GUI
+// caches the answer for the same 60 s, so a newly installed editor still
+// appears within a minute.
+const DETECTION_TTL_MS = 60_000;
+let cachedDetection: { at: number; result: Promise<DetectedEditor[]> } | null = null;
+
+/** Forgets the shared detection result (for tests). */
+export function clearEditorDetectionCache(): void {
+  cachedDetection = null;
+}
+
+export function detectEditors(): Promise<DetectedEditor[]> {
+  if (cachedDetection && Date.now() - cachedDetection.at < DETECTION_TTL_MS) return cachedDetection.result;
+  const result = probeEditors();
+  cachedDetection = { at: Date.now(), result };
+  result.catch(() => {
+    if (cachedDetection?.result === result) cachedDetection = null;
+  });
+  return result;
+}
+
+async function probeEditors(): Promise<DetectedEditor[]> {
   const currentPlatform = process.platform;
   const candidates = EDITOR_CANDIDATES.filter(
     (c) => !c.platforms || c.platforms.includes(currentPlatform)

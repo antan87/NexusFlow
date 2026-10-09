@@ -51,10 +51,12 @@ test.describe('Redesigned ContextSpace shell', () => {
     await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
 
     // Deep link selects a workspace and shows the detail tabs.
-    await page.goto('/#/workspaces/feature-x');
+    await page.goto('/#/workspaces/feature-x/overview');
     await expect(page.getByRole('heading', { name: 'feature-x' })).toBeVisible();
-    await expect(page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
     await expect(page.getByText('Test feature workspace', { exact: true }).first()).toBeVisible();
+    // The overview keeps its address; the rail beside it opens the other parts.
+    await page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Plan' }).click();
+    await expect(page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Plan' })).toHaveAttribute('aria-current', 'page');
   });
 });
 
@@ -156,10 +158,7 @@ test.describe('Narrow-screen navigation', () => {
     expect(main?.width).toBe(390);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     // Every destination and section stays reachable by keyboard without growing the page.
-    const context = page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: 'Plan & Context' });
-    await context.focus();
-    await page.keyboard.press('Enter');
-    const skills = page.getByRole('navigation', { name: 'Plan & Context sections' }).getByRole('link', { name: 'Skills' });
+    const skills = page.getByRole('navigation', { name: 'Workspace' }).getByRole('link', { name: /^Skills/ });
     await skills.focus();
     await page.keyboard.press('Enter');
     await expect(skills).toHaveAttribute('aria-current', 'page');

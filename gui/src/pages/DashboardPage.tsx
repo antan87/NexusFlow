@@ -1,4 +1,4 @@
-import { useState, useMemo, type ReactNode } from 'react';
+import { useEffect, useState, useMemo, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   FolderGit2,
@@ -17,6 +17,7 @@ import {
 import { BsOpenai } from 'react-icons/bs';
 import { SiClaude, SiGithubcopilot } from 'react-icons/si';
 import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
+import { HarnessIcon } from '../components/icons/HarnessIcon.js';
 import type { Feature, WorkspaceStatus, WorkspaceLaunchTarget } from '../types.js';
 import { Button } from '../components/ui/button.js';
 import { StatusBadge } from '../components/ui/status-badge.js';
@@ -26,6 +27,7 @@ import { apiFetch } from '../lib/api/client.js';
 import { repoName } from '../lib/status.js';
 import { useWorktreeNavigationState } from '../features/worktrees/worktreeStore.js';
 import { WorkspaceChatResume } from '../features/chat/WorkspaceChatResume.js';
+import { perfMarkOnce } from '../lib/perfMarks.js';
 
 export interface HarnessOption {
   id: string;
@@ -179,6 +181,29 @@ const HARNESS_REGISTRY: HarnessConfig[] = [
       },
     ],
   },
+  {
+    id: 'pi',
+    name: 'Pi',
+    shortName: 'Pi',
+    cliCommand: 'pi',
+    icon: (
+      <span className="grid size-5 place-items-center rounded bg-muted text-foreground shadow-2xs">
+        <HarnessIcon harness="pi" className="size-3" />
+      </span>
+    ),
+    getOptions: ({ aiDetected }) => [
+      {
+        id: 'pi-cli',
+        label: 'CLI in Terminal',
+        shortLabel: 'CLI',
+        type: 'cli',
+        command: 'pi',
+        isAvailable: aiDetected['pi'] ?? false,
+        unavailableReason: 'CLI "pi" not found on PATH',
+        icon: <Terminal size={12} />,
+      },
+    ],
+  },
 ];
 
 interface DashboardPageProps {
@@ -208,6 +233,13 @@ export function DashboardPage({
 }: DashboardPageProps) {
   const aiDetect = useAiDetect();
   const launchTargets = useWorkspaceLaunchTargets();
+
+  // Usable means the workspace cards are on screen; Git status is optional work.
+  useEffect(() => {
+    if (!workspacesLoading) perfMarkOnce('cs:overview-usable', { workspaces: workspaces.length });
+    if (checkedWorkspaceCount > 0) perfMarkOnce('cs:overview-status-first', { checked: checkedWorkspaceCount });
+    if (statusesComplete) perfMarkOnce('cs:overview-status-complete', { checked: checkedWorkspaceCount });
+  }, [workspacesLoading, workspaces.length, checkedWorkspaceCount, statusesComplete]);
   const launchTerminalMutation = useLaunchTerminal();
 
   const [search, setSearch] = useState('');

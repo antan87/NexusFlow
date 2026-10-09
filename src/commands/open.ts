@@ -142,6 +142,8 @@ export async function openCommand(): Promise<void> {
           cmdArgs = ['--resume', targetSessionId];
         } else if (assistant === 'cursor') {
           cmdArgs = ['--resume', targetSessionId];
+        } else if (assistant === 'pi') {
+          cmdArgs = ['--session', targetSessionId];
         }
       } else {
         // No existing session for this assistant (or user chose new session): start fresh

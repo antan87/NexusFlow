@@ -529,6 +529,16 @@ describe('JSON error boundaries and malformed lines resilience', () => {
       expect(await findActiveAssistants(workspaceDir)).toContain('codex');
     });
 
+    it('reads a session header that is longer than the first read', async () => {
+      // Real session_meta lines carry base instructions (~20 KB); make this one exceed 32 KB.
+      await fs.writeFile(
+        path.join(process.env.CODEX_HOME!, 'sessions', 'rollout-2026-09-06T10-00-00-long.jsonl'),
+        JSON.stringify({ type: 'session_meta', payload: { id: '0199a213-81c0-7800-8aa1-bbab2a035a53', cwd: workspaceDir, instructions: 'x'.repeat(40_000) } }) + '\n',
+      );
+
+      expect(await findActiveAssistants(workspaceDir)).toContain('codex');
+    });
+
     it('rechecks a Codex rollout whose session header was not written yet', async () => {
       const rollout = path.join(process.env.CODEX_HOME!, 'sessions', 'rollout-2026-09-03T10-00-00-c.jsonl');
       await fs.writeFile(rollout, '');
@@ -565,6 +575,78 @@ describe('JSON error boundaries and malformed lines resilience', () => {
       await fs.rm(rollout);
 
       expect(await findActiveAssistants(workspaceDir)).not.toContain('codex');
+    });
+  });
+
+  describe('findSessions transcript cache', () => {
+    const claudeRecord = (sessionId: string, cwd: string, text: string, i: number) => JSON.stringify({
+      type: i % 2 === 0 ? 'user' : 'assistant', sessionId, cwd, isSidechain: false,
+      timestamp: new Date(Date.UTC(2026, 8, 1, 10, 0, i)).toISOString(),
+      message: { role: i % 2 === 0 ? 'user' : 'assistant', content: text },
+    }) + '\n';
+
+    async function writeClaudeSession(sessionId: string, turns: number) {
+      const dir = path.join(process.env.CLAUDE_CONFIG_DIR!, 'projects', getClaudeProjectFolderName(workspaceDir));
+      await fs.mkdir(dir, { recursive: true });
+      const file = path.join(dir, `${sessionId}.jsonl`);
+      await fs.writeFile(file, Array.from({ length: turns }, (_, i) => claudeRecord(sessionId, workspaceDir, `turn ${i}`, i)).join(''));
+      return file;
+    }
+
+    it('serves an unchanged transcript from the cache without reading it again', async () => {
+      const sessionId = '11111111-1111-4111-8111-111111111111';
+      const file = await writeClaudeSession(sessionId, 4);
+      // Whole seconds, so restoring the time below reproduces the exact mtime.
+      const pinned = new Date('2026-09-01T00:00:00Z');
+      await fs.utimes(file, pinned, pinned);
+      const first = await findSessions(workspaceDir, [], 'claude');
+      expect(first[0]?.title).toBe('turn 0');
+
+      // Same size and mtime, different bytes: only a cache hit still reports the old title.
+      const content = await fs.readFile(file, 'utf8');
+      await fs.writeFile(file, content.replace('turn 0', 'TURN 0'));
+      await fs.utimes(file, pinned, pinned);
+
+      expect(await findSessions(workspaceDir, [], 'claude')).toEqual(first);
+    });
+
+    it('re-parses a transcript as soon as it grows', async () => {
+      const sessionId = '22222222-2222-4222-8222-222222222222';
+      const file = await writeClaudeSession(sessionId, 2);
+      expect((await findSessions(workspaceDir, [], 'claude'))[0]?.messageCount).toBe(2);
+
+      await fs.appendFile(file, claudeRecord(sessionId, workspaceDir, 'another turn', 2));
+
+      expect((await findSessions(workspaceDir, [], 'claude'))[0]?.messageCount).toBe(3);
+    });
+
+    it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+      'does not open a rollout again once its cwd is known to belong elsewhere',
+      async () => {
+        const sessionsDir = path.join(process.env.CODEX_HOME!, 'sessions');
+        const other = path.join(sessionsDir, 'rollout-2026-09-01T10-00-00-other.jsonl');
+        await fs.writeFile(other, JSON.stringify({ type: 'session_meta', payload: { id: '0199a213-81c0-7800-8aa1-bbab2a035a51', cwd: '/some/unrelated/project' } }) + '\n');
+        expect(await findSessions(workspaceDir, [], 'codex')).toEqual([]);
+
+        await fs.chmod(other, 0o000);
+        try {
+          await expect(findSessions(workspaceDir, [], 'codex')).resolves.toEqual([]);
+        } finally {
+          await fs.chmod(other, 0o644);
+        }
+      },
+    );
+
+    it('still matches an older rollout without a recorded cwd by its content', async () => {
+      const sessionsDir = path.join(process.env.CODEX_HOME!, 'sessions');
+      await fs.writeFile(path.join(sessionsDir, 'rollout-2026-01-01T10-00-00-legacy.jsonl'), [
+        JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: `work in ${workspaceDir}` } }),
+        JSON.stringify({ type: 'session_meta', payload: { id: '0199a213-81c0-7800-8aa1-bbab2a035a52' } }),
+      ].join('\n') + '\n');
+
+      const sessions = await findSessions(workspaceDir, [], 'codex');
+      expect(sessions.map((s) => s.id)).toEqual(['0199a213-81c0-7800-8aa1-bbab2a035a52']);
+      expect(await findSessions(workspaceDir, [], 'codex')).toEqual(sessions);
     });
   });
 });

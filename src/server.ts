@@ -1,9 +1,10 @@
-import { listRepositoryChanges } from './core/repository-changes.js';
+import { listRepositoryChangesWithFingerprint, parseGitStatus } from './core/repository-changes.js';
+import { resolveFileReference } from './core/file-reference-resolve.js';
 import { decodeImageAttachment, InvalidImageAttachment } from './services/image-attachment.js';
 import { registerTerminalRoutes, terminalManager } from './terminal/routes.js';
 import { registerWorkGuidanceRoutes } from './http/work-guidance-routes.js';
 import { extractAstSymbols } from './services/symbolService.js';
-import { readRepositoryFile, RepositoryFileAccessError } from './services/repository-file.js';
+import { looksBinary, MAX_VIEWABLE_FILE_BYTES, readRepositoryFileForView, RepositoryFileAccessError, resolveRepositoryFileForLaunch, type OmittedReason } from './services/repository-file.js';
 /**
  * @module server
  * Hono local web server for the NexusFlow GUI.
@@ -44,6 +45,7 @@ import {
   BRAND_NAME,
 } from './core/constants.js';
 import { configPatchSchema } from './core/config-schema.js';
+import { countRequest, installPerfCounters, resetPerfCounters, snapshotPerfCounters } from './core/perf-counters.js';
 import { listStorageProviders } from './core/adapters/registry.js';
 import { scanForRepos } from './core/scanner.js';
 import { createNewRepo, isValidProjectName } from './core/new-repo.js';
@@ -57,6 +59,11 @@ import {
 } from './utils/repo-freshness.js';
 import { createWorkspace, listWorkspaces, loadFeatureConfig, saveFeatureConfig, loadWorkspaceManifest, deleteWorkspace, addRepoToWorkspace, isolateWorkspaceRepo } from './core/workspace.js';
 import { loadWorkspaceState } from './core/workspace-state.js';
+import { acknowledgeInputRequests, latestInputRequest, type InputRequest } from './core/attention.js';
+import {
+  ScreenSharingOffError, getScreenSharing, readScreenContext, saveScreenContext, setScreenSharing,
+} from './core/screen-context.js';
+import { watchLiveEvents, type LiveEvent } from './core/screen-events.js';
 import { analyzeAllRepos } from './analyzers/index.js';
 import { generateContextFiles } from './generators/index.js';
 import {
@@ -125,6 +132,7 @@ import {
 } from './core/scheduler.js';
 import {
   detectAllServices,
+  suggestProcfiles,
   detectOrchestrationTools,
   startServices,
   stopServices,
@@ -133,9 +141,10 @@ import {
   restartService,
   startOrchestrator,
   stopOrchestrator,
+  stopRecordedOrchestrator,
   tailLogFile,
   loadRunningState,
-  getPm2List,
+  readPm2List,
 } from './orchestration/index.js';
 import { checkForUpdates, getCurrentVersion, getToolsStatus } from './utils/update-check.js';
 import { getWorkflowTemplates, saveWorkflowTemplate, deleteWorkflowTemplate } from './utils/workflows.js';
@@ -367,6 +376,9 @@ app.get('/ws', async (c, next) => {
 // Allowed editor binaries/scripts to prevent command injection
 const ALLOWED_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'antigravity', 'agy', 'idea', 'charm', 'webstorm', 'subl', 'nano', 'vim', 'nvim', 'emacs', 'windsurf', 'zed']);
 
+// A patch is allowed to be a few times the largest file shown in full: it holds both sides.
+const MAX_DIFF_BYTES = MAX_VIEWABLE_FILE_BYTES * 4;
+
 // ─── Path containment guards ──────────────────────────────────────────────
 // The server exposes state-changing routes keyed by a workspace `:id` taken
 // straight from the URL. Without containment checks, `..%2f..` sequences let a
@@ -463,6 +475,29 @@ async function resolveExactLaunchWorkspace(
     return normDeclared === normSafe
       ? safeWorkspacePath
       : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a launch path under devDir to a source repository: after links are
+ * resolved it must stay inside devDir and be a git repository itself. A parent
+ * folder, an unrelated project, or a link that leads out of devDir is refused.
+ */
+async function resolveSourceRepository(
+  devDir: string,
+  candidatePath: string,
+): Promise<string | null> {
+  try {
+    const [canonicalRoot, canonicalRepo] = await Promise.all([
+      fs.realpath(devDir),
+      fs.realpath(candidatePath),
+    ]);
+    const safeRepoPath = assertWithin(canonicalRoot, canonicalRepo);
+    // `.git` is a directory in a clone and a file in a linked worktree.
+    await fs.access(path.join(safeRepoPath, '.git'));
+    return safeRepoPath;
   } catch {
     return null;
   }
@@ -591,6 +626,20 @@ app.use('*', async (c, next) => {
   }
   await next();
 });
+
+// Work counters for the performance rule checks in perf/. Off unless
+// CONTEXTSPACE_PERF_COUNTERS=1, so normal runs register nothing here.
+if (installPerfCounters()) {
+  app.use('/api/*', async (c, next) => {
+    if (c.req.path.startsWith('/api/perf/')) return next();
+    await countRequest(c.req.method, c.req.path, c.req.raw.signal, () => next());
+  });
+  app.get('/api/perf/counters', (c) => {
+    const snapshot = snapshotPerfCounters();
+    if (c.req.query('reset') === '1') resetPerfCounters();
+    return c.json(snapshot);
+  });
+}
 
 // Enforce trusted local origin on all mutating HTTP methods across /api/* to defend against
 // cross-site request forgery and browser form posts from untrusted web pages.
@@ -1132,13 +1181,28 @@ function worstSyncStatus(states: RepoSyncState[]): SyncStatus | 'unknown' {
 
 // A paged status scan keeps one stable catalog and PM2 snapshot across requests.
 // The small bounded cache avoids rescanning every manifest for each page.
+// Many workspaces use the same repository in place, so one scan also runs
+// `git status` once per distinct repository and shares it across its pages;
+// the next scan (a new snapshot) reads fresh status.
 const STATUS_SNAPSHOT_TTL_MS = 5 * 60 * 1000;
+type RepoStatusMemo = Map<string, ReturnType<typeof getRepoStatus>>;
 const statusSnapshots = new Map<string, {
   workspacesDir: string;
   workspaces: Feature[];
-  pm2List: Promise<any[]>;
+  pm2List: Promise<any[] | null>;
+  repoStatus: RepoStatusMemo;
   expiresAt: number;
 }>();
+
+function memoizedRepoStatus(memo: RepoStatusMemo, repoPath: string): ReturnType<typeof getRepoStatus> {
+  const key = path.resolve(repoPath);
+  let status = memo.get(key);
+  if (!status) {
+    status = getRepoStatus(key, { readOnly: true });
+    memo.set(key, status);
+  }
+  return status;
+}
 
 // 4b. Aggregate at-a-glance status for every workspace (for the listing overview).
 // Git status is read-only; never fetch/rebase here.
@@ -1175,7 +1239,8 @@ app.get('/api/workspaces/status', async (c) => {
       snapshot = {
         workspacesDir: config.workspacesDir,
         workspaces,
-        pm2List: workspaces.length ? getPm2List() : Promise.resolve([]),
+        pm2List: workspaces.length ? readPm2List() : Promise.resolve([]),
+        repoStatus: new Map(),
         expiresAt: now + STATUS_SNAPSHOT_TTL_MS,
       };
       snapshotId = randomUUID();
@@ -1183,11 +1248,12 @@ app.get('/api/workspaces/status', async (c) => {
       while (statusSnapshots.size > 16) statusSnapshots.delete(statusSnapshots.keys().next().value!);
     }
     const workspaces = snapshot?.workspaces ?? await listWorkspaces(config.workspacesDir);
+    const repoStatusMemo: RepoStatusMemo = snapshot?.repoStatus ?? new Map();
     const selected = paged ? workspaces.slice(offset, offset + limit) : workspaces;
 
     // Fetch the PM2 process list once for the whole overview instead of
     // spawning `npx pm2 jlist` per workspace (slow, especially on Windows).
-    const pm2List = selected.length ? await (snapshot?.pm2List ?? getPm2List()) : [];
+    const pm2List = selected.length ? await (snapshot?.pm2List ?? readPm2List()) : [];
 
     const entries = await Promise.all(
       selected.map(async (ws) => {
@@ -1213,7 +1279,7 @@ app.get('/api/workspaces/status', async (c) => {
           // the workspace dir, or the source repos themselves for in-place.
           for (const repoPath of ws.repos) {
             const worktreePath = resolveFeatureRepoPath(ws, workspacePath, repoPath);
-            const repoStatus = await getRepoStatus(worktreePath);
+            const repoStatus = await memoizedRepoStatus(repoStatusMemo, worktreePath);
             if (repoStatus.hasChanges) {
               status.dirtyRepos += 1;
               status.changedFiles += repoStatus.changedFiles.length;
@@ -2007,17 +2073,25 @@ app.post('/api/open-editor', async (c) => {
         }
       }
     } else {
-      exactWorkspacePath = safeWorkspacePath;
+      // Under devDir the target must be a source repository reached without
+      // following a link out of devDir; continue with its resolved path.
+      exactWorkspacePath = await resolveSourceRepository(config.devDir, safeWorkspacePath);
+      if (exactWorkspacePath) safeWorkspacePath = exactWorkspacePath;
     }
     if (!exactWorkspacePath) {
-      return c.json({ error: 'Workspace configuration not found.' }, 404);
+      return c.json({ error: isDevDir ? 'Source repository not found.' : 'Workspace configuration not found.' }, 404);
     }
 
     let resolvedFilePath: string | undefined;
     if (typeof filePath === 'string' && filePath.trim()) {
-      const resolved = path.resolve(safeWorkspacePath, filePath.trim());
-      assertWithin(safeWorkspacePath, resolved);
-      resolvedFilePath = resolved;
+      try {
+        resolvedFilePath = await resolveRepositoryFileForLaunch(safeWorkspacePath, filePath.trim());
+      } catch (error) {
+        if (error instanceof RepositoryFileAccessError) {
+          return c.json({ error: 'File does not exist or is not a regular file inside the workspace.' }, 400);
+        }
+        throw error;
+      }
     }
 
     await launchWorkspaceTarget(
@@ -2053,6 +2127,9 @@ app.get('/api/workspace/:id/services', async (c) => {
       orchestrationTools: tools,
       runningState: runningState?.services || [],
       runningOrchestrators: runningState?.orchestrators || [],
+      failures: runningState?.failures || [],
+      // One suggestion per repository that declares nothing, even when others do.
+      suggestions: suggestProcfiles(services.filter((service) => !service.declared)),
     });
   } catch (error) {
     return errorResponse(c, error);
@@ -2068,7 +2145,8 @@ function getWorkspaceLogDir(workspacePath: string): string {
 }
 
 // 10. Start services in workspace. Configs are re-detected server-side —
-// the client only says "start", never what to execute.
+// the client only says "start", never what to execute. Only services the
+// repositories declare start together; guessed ones start one at a time.
 app.post('/api/workspace/:id/services/start', async (c) => {
   try {
     const id = c.req.param('id');
@@ -2076,9 +2154,12 @@ app.post('/api/workspace/:id/services/start', async (c) => {
     const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
     const logDir = getWorkspaceLogDir(workspacePath);
 
-    const services = await detectAllServices(workspacePath);
-    await startServices(services, workspacePath, logDir);
-    return c.json({ success: true });
+    const declared = (await detectAllServices(workspacePath)).filter((service) => service.declared);
+    if (declared.length === 0) {
+      return c.json({ error: 'No declared services. Add a Procfile.dev with one `name: command` line per process, or start a guessed service on its own.' }, 409);
+    }
+    const results = await startServices(declared, workspacePath, logDir);
+    return c.json({ success: results.every((result) => result.status === 'running'), results });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -2119,10 +2200,10 @@ app.post('/api/workspace/:id/services/:serviceName/:action{start|stop|restart}',
     if (!service) {
       return c.json({ error: `Unknown service "${serviceName}" in this workspace.` }, 404);
     }
-    const running = action === 'restart'
+    const result = action === 'restart'
       ? await restartService(service, workspacePath, logDir)
       : await startService(service, workspacePath, logDir);
-    return c.json({ success: running !== null, service: running });
+    return c.json({ success: result.status === 'running', service: result, reason: result.reason });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -2240,6 +2321,8 @@ app.post('/api/workspace/:id/orchestrators/:action{start|stop}', async (c) => {
     const tools = await detectOrchestrationTools(workspacePath);
     const detection = tools.find((t) => t.id === body.id);
     if (!detection) {
+      // A recorded tool that is no longer detected can still be stopped.
+      if (action === 'stop' && await stopRecordedOrchestrator(body.id, workspacePath)) return c.json({ success: true });
       return c.json({ error: `Unknown orchestration tool "${body.id}" in this workspace.` }, 404);
     }
 
@@ -2268,6 +2351,7 @@ app.get('/api/workspace/:id/changes', async (c) => {
     }
 
     const results: any[] = [];
+    const fingerprints: string[] = [];
 
     // Check git status in each repo (worktree, or source repo for in-place)
     for (const repoPath of feature.repos) {
@@ -2275,24 +2359,31 @@ app.get('/api/workspace/:id/changes', async (c) => {
       const worktreePath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
 
       try {
-        const files = await listRepositoryChanges(worktreePath, c.req.query('include') === 'all');
+        const listing = await listRepositoryChangesWithFingerprint(worktreePath, c.req.query('include') === 'all');
+        fingerprints.push(listing.fingerprint);
 
         results.push({
           repoName,
           repoPath: worktreePath,
-          files,
+          files: listing.files,
         });
       } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        fingerprints.push(`error:${message}`);
         results.push({
           repoName,
           repoPath: worktreePath,
           files: [],
-          error: error instanceof Error ? error.message : String(error),
+          error: message,
         });
       }
     }
 
-    return c.json({ changes: results });
+    // A poller that already holds this state gets a small reply instead of
+    // the full listing (100k entries for a large repository in Files mode).
+    const token = createHash('sha1').update(JSON.stringify([id, feature.repos, fingerprints])).digest('hex');
+    if (c.req.query('known') === token) return c.json({ unchanged: true, token });
+    return c.json({ changes: results, token });
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -2334,31 +2425,61 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
     const normalizedFile = filePath.replace(/\\/g, '/');
 
     // Run git diff, disk file read, and git show HEAD in parallel
-    const [diffResult, fileContentResult, originalContentResult] = await Promise.allSettled([
-      execa('git', ['diff', 'HEAD', '--', filePath], { cwd: worktreePath, reject: false }),
-      readRepositoryFile(worktreePath, filePath),
-      execa('git', ['show', `HEAD:${normalizedFile}`], { cwd: worktreePath, reject: false, stripFinalNewline: false }),
+    const [diffResult, fileResult, originalResult] = await Promise.allSettled([
+      execa('git', ['diff', 'HEAD', '--', filePath], { cwd: worktreePath, reject: false, maxBuffer: MAX_DIFF_BYTES }),
+      readRepositoryFileForView(worktreePath, filePath),
+      // Capped like the working copy: an oversized original reports isMaxBuffer instead of filling memory.
+      execa('git', ['show', `HEAD:${normalizedFile}`], { cwd: worktreePath, reject: false, stripFinalNewline: false, maxBuffer: MAX_VIEWABLE_FILE_BYTES }),
     ]);
 
-    let diff = diffResult.status === 'fulfilled' ? (diffResult.value.stdout || diffResult.value.stderr || '') : '';
-    if (fileContentResult.status === 'rejected') {
-      if (fileContentResult.reason instanceof RepositoryFileAccessError) throw new PathAccessError(fileContentResult.reason.message);
-      throw fileContentResult.reason;
+    let diff = '';
+    // An enormous patch is as costly to send and to parse as an enormous file, so it is not sent.
+    let diffOmitted = false;
+    if (diffResult.status === 'fulfilled') {
+      if (diffResult.value.isMaxBuffer) diffOmitted = true;
+      else diff = diffResult.value.stdout || diffResult.value.stderr || '';
     }
-    let fileContent = fileContentResult.value;
-    let originalContent = originalContentResult.status === 'fulfilled' ? (originalContentResult.value.stdout || '') : '';
+    if (fileResult.status === 'rejected') {
+      if (fileResult.reason instanceof RepositoryFileAccessError) throw new PathAccessError(fileResult.reason.message);
+      throw fileResult.reason;
+    }
+    let fileContent = fileResult.value.content;
+    let originalContent = '';
+    // Why the full text was not loaded, if it was not. The viewer then shows the patch hunks only.
+    let contentOmitted: OmittedReason | undefined = fileResult.value.omitted;
+    let trackedAtHead = false;
+    if (originalResult.status === 'fulfilled') {
+      const original = originalResult.value;
+      trackedAtHead = original.exitCode === 0 || Boolean(original.isMaxBuffer);
+      if (original.isMaxBuffer) contentOmitted ??= 'too-large';
+      else if (looksBinary(original.stdout || '')) contentOmitted ??= 'binary';
+      else originalContent = original.stdout || '';
+    }
+    // Both sides or neither: a diff view of one real side against an empty one would mislead.
+    if (contentOmitted) {
+      fileContent = '';
+      originalContent = '';
+    }
 
     // Handle untracked new files if diff is empty but file exists on disk
-    if (!diff && fileContent && !originalContent) {
+    if (!diff && !diffOmitted && (fileContent || fileResult.value.omitted) && !trackedAtHead) {
       try {
         const untrackedDiff = await execa('git', ['diff', '--no-index', '--', '/dev/null', filePath], {
           cwd: worktreePath,
           reject: false,
+          maxBuffer: MAX_DIFF_BYTES,
         });
-        diff = untrackedDiff.stdout || untrackedDiff.stderr || '';
+        if (untrackedDiff.isMaxBuffer) diffOmitted = true;
+        else diff = untrackedDiff.stdout || untrackedDiff.stderr || '';
       } catch {
         diff = '';
       }
+    }
+    // A diff too large to send means the file is too large to show in full as well.
+    if (diffOmitted) {
+      contentOmitted ??= 'too-large';
+      fileContent = '';
+      originalContent = '';
     }
 
     let symbols: any[] = [];
@@ -2370,7 +2491,34 @@ app.get('/api/workspace/:id/changes/diff', async (c) => {
       }
     }
 
-    return c.json({ diff, fileContent, originalContent, symbols });
+    return c.json({ diff, fileContent, originalContent, symbols, ...(contentOmitted ? { contentOmitted } : {}), ...(diffOmitted ? { diffOmitted: true } : {}) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13_resolve. Which repository file a path printed in a terminal or a document names.
+// The code view asks this instead of downloading the whole listing and matching it itself, and
+// the answer covers ignored files and paths relative to the directory the session runs in.
+app.get('/api/workspace/:id/files/resolve', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const reference = c.req.query('path');
+    if (!reference) return c.json({ error: 'Missing path query parameter.' }, 400);
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const feature = await loadFeatureConfig(workspacePath);
+    if (!feature) return c.json({ error: 'Workspace configuration not found.' }, 404);
+    const repos = feature.repos.map((repoPath) => ({
+      repoName: path.basename(repoPath),
+      repoPath: resolveFeatureRepoPath(feature, workspacePath, repoPath),
+    }));
+    return c.json(await resolveFileReference(reference, {
+      repos,
+      workspacePath,
+      cwd: c.req.query('cwd') || undefined,
+      listFiles: async (repo) => (await listRepositoryChangesWithFingerprint(repo.repoPath, true)).files.map((file) => file.file),
+    }));
   } catch (error) {
     return errorResponse(c, error);
   }
@@ -2396,13 +2544,16 @@ app.get('/api/workspace/:id/changes/symbols', async (c) => {
         const worktreePath = resolveFeatureRepoPath(feature, workspacePath, repoPath);
 
         try {
-          const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: worktreePath });
-          const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+          // -z with --untracked-files=all keeps renames, files in new directories
+          // and paths with spaces intact; plain porcelain quotes or folds them.
+          const { stdout } = await execa(
+            'git',
+            ['--no-optional-locks', 'status', '--porcelain=v1', '-z', '--untracked-files=all'],
+            { cwd: worktreePath, stripFinalNewline: false },
+          );
 
-          const readPromises = lines.map(async (line) => {
-            const status = line.slice(0, 2).trim();
-            const file = line.slice(2).trim();
-            if (status === 'D') return; // Deleted files have no symbols on disk
+          const readPromises = parseGitStatus(stdout).map(async ({ file, type }) => {
+            if (type === 'deleted') return; // Deleted files have no symbols on disk
 
             const ext = file.split('.').pop()?.toLowerCase();
             if (!ext || !['cs', 'ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs'].includes(ext)) {
@@ -2410,7 +2561,8 @@ app.get('/api/workspace/:id/changes/symbols', async (c) => {
             }
 
             try {
-              const content = await readRepositoryFile(worktreePath, file);
+              const { content, omitted } = await readRepositoryFileForView(worktreePath, file);
+              if (omitted) return; // too large or binary: not worth a synchronous parse
               const extracted = await extractAstSymbols(file, content);
               if (extracted && extracted.length > 0) {
                 for (const s of extracted) {
@@ -2823,6 +2975,150 @@ app.post('/api/workspace/:id/lifecycle/step', async (c) => {
   }
 });
 
+// 13c-2b. Checkable progress facts: milestones (with reopened work), open questions,
+// changed files and the last verification. Cheap enough to poll: no remote queries.
+app.get('/api/workspace/:id/progress-facts', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const { getProgressFacts } = await import('./core/progress-facts.js');
+    return c.json({ facts: await getProgressFacts(workspacePath) });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2c. Send a finished milestone back for rework. This route is the user's own
+// action, so the reopen is recorded as theirs.
+app.post('/api/workspace/:id/lifecycle/reopen', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const body = (await c.req.json().catch(() => ({}))) as { stepId?: unknown; reason?: unknown };
+    if (typeof body.stepId !== 'string' || !body.stepId || typeof body.reason !== 'string') {
+      return c.json({ error: 'stepId and reason are required.' }, 400);
+    }
+    const { reopenLifecycleStep, LifecycleStepError } = await import('./core/lifecycle.js');
+    try {
+      const lifecycle = await reopenLifecycleStep(workspacePath, body.stepId, { reason: body.reason, by: 'user' });
+      return c.json({ lifecycle });
+    } catch (error) {
+      if (error instanceof LifecycleStepError) {
+        return c.json({ error: error.message, code: error.code }, error.code === 'not_found' ? 404 : 409);
+      }
+      // A rejected reason (empty or too long) is the caller's mistake, not a server fault.
+      if (error instanceof Error && error.name === 'ZodError') {
+        const issues = (error as Error & { issues?: Array<{ message?: string }> }).issues;
+        return c.json({ error: issues?.[0]?.message ?? 'The reason is not valid.' }, 400);
+      }
+      throw error;
+    }
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2d. Mark every question the AI has asked so far as answered. Replies typed into
+// the chat terminal never reach the ledger, so the app records this explicitly.
+app.post('/api/workspace/:id/input-requests/acknowledge', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    return c.json(await acknowledgeInputRequests(workspacePath));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2e. The live feed for a workspace's screen: what the AI told it to show, the questions the AI
+// asked, and when they were answered. A screen that reconnects sends the time of the last event it saw,
+// as `since` or as the standard Last-Event-ID header (each event's id is its timestamp).
+function liveEventId(live: LiveEvent): string {
+  return live.type === 'screen' ? live.event.timestamp : live.type === 'question' ? live.request.timestamp : live.timestamp;
+}
+app.get('/api/workspace/:id/screen-events', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, id);
+    const sinceText = c.req.query('since') ?? c.req.header('last-event-id');
+    const parsed = sinceText ? Date.parse(sinceText) : NaN;
+    const since = Number.isFinite(parsed) ? parsed : undefined;
+
+    c.header('Content-Type', 'text/event-stream');
+    c.header('Cache-Control', 'no-cache');
+    c.header('Connection', 'keep-alive');
+    return streamSSE(c, async (stream) => {
+      const controller = new AbortController();
+      stream.onAbort(() => controller.abort());
+      // A comment-sized event now and then keeps proxies from closing a quiet connection and lets a dead one be noticed.
+      const heartbeat = setInterval(() => {
+        stream.writeSSE({ event: 'ping', data: '{}' }).catch(() => controller.abort());
+      }, 15_000);
+      try {
+        for await (const live of watchLiveEvents(workspacePath, { since, signal: controller.signal })) {
+          await stream.writeSSE({ event: live.type, id: liveEventId(live), data: JSON.stringify(live) });
+        }
+      } finally {
+        clearInterval(heartbeat);
+      }
+    });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2f. Whether the user shares what they are looking at with the AI. Off until they switch it on;
+// switching it off deletes what was stored.
+app.get('/api/workspace/:id/screen-sharing', async (c) => {
+  try {
+    const config = await loadConfig();
+    return c.json(await getScreenSharing(resolveWorkspacePath(config.workspacesDir, c.req.param('id'))));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+app.put('/api/workspace/:id/screen-sharing', async (c) => {
+  try {
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    const body = (await c.req.json().catch(() => ({}))) as { enabled?: unknown };
+    if (typeof body.enabled !== 'boolean') return c.json({ error: 'enabled (true or false) is required.' }, 400);
+    return c.json(await setScreenSharing(workspacePath, body.enabled));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-2g. What the screen reports it is showing, and what the AI would see if it asked. Reporting is
+// refused while sharing is off, so a screen that has not been told to share cannot leak anything.
+app.get('/api/workspace/:id/screen-context', async (c) => {
+  try {
+    const config = await loadConfig();
+    return c.json(await readScreenContext(resolveWorkspacePath(config.workspacesDir, c.req.param('id'))));
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+app.put('/api/workspace/:id/screen-context', async (c) => {
+  try {
+    const config = await loadConfig();
+    const workspacePath = resolveWorkspacePath(config.workspacesDir, c.req.param('id'));
+    const body = await c.req.json().catch(() => undefined);
+    try {
+      return c.json({ context: await saveScreenContext(workspacePath, body ?? {}) });
+    } catch (error) {
+      if (error instanceof ScreenSharingOffError) return c.json({ error: error.message, code: 'sharing_off' }, 409);
+      throw error;
+    }
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
 // 13c-3. Run mechanical verification gate for workspace
 app.post('/api/workspace/:id/verify', async (c) => {
   try {
@@ -2994,6 +3290,29 @@ app.post('/api/workspace/:id/stream', async (c) => {
     await fs.appendFile(chatFile, JSON.stringify(entry) + '\n', 'utf-8');
 
     return c.json({ success: true, entry });
+  } catch (error) {
+    return errorResponse(c, error);
+  }
+});
+
+// 13c-6. Newest "agent needs input" request for each named workspace (the open CLI chats).
+// Cheap by design: it only tail-reads the ledgers of the ids it is given, no directory scan.
+const ATTENTION_MAX_WORKSPACES = 100;
+app.get('/api/attention', async (c) => {
+  try {
+    const config = await loadConfig();
+    const ids = [...new Set((c.req.query('workspaces') ?? '').split(',').map((id) => id.trim()).filter(Boolean))]
+      .slice(0, ATTENTION_MAX_WORKSPACES);
+    const found = await Promise.all(ids.map(async (workspaceId) => {
+      try {
+        const request = await latestInputRequest(resolveWorkspacePath(config.workspacesDir, workspaceId));
+        return request ? { workspaceId, ...request } : null;
+      } catch {
+        // An id outside the workspaces directory or an unreadable ledger is not an alert.
+        return null;
+      }
+    }));
+    return c.json({ requests: found.filter((request): request is InputRequest & { workspaceId: string } => request !== null) });
   } catch (error) {
     return errorResponse(c, error);
   }

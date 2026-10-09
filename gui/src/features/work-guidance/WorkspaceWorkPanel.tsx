@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { PlanningNotesPanel } from './PlanningNotesPanel.js';
+import { DraftConflictNotice, DraftStateLabel, type DraftState } from './BriefDraftNotices.js';
+import {
+  assignmentConflicts, clearDraft, emptyDocumentForm, mergeAssignmentDraft, pickAssignment, readDraft, reconcileAssignment, reconcileDocumentForm, reconcileMilestones,
+  sameAssignment, sameDocumentForm, sameSteps, stepChanges, withSavedProgress, writeDraft, type AssignmentDraft, type BriefKind, type DocumentFormDraft, type StoredDraft,
+} from './briefDrafts.js';
+import { CheckCircle2, Circle, CircleDot, CircleSlash, Copy, Eye, FileText, Pencil, RefreshCw } from 'lucide-react';
 import { Button } from '../../components/ui/button.js';
+import { IconButton } from '../../components/ui/icon-button.js';
+import { headline } from '../progress/progressView.js';
 import { Input } from '../../components/ui/input.js';
 import { Textarea } from '../../components/ui/textarea.js';
 import { apiFetch } from '../../lib/api/client.js';
@@ -18,15 +26,81 @@ type WorkContext = {
   contextRefreshError?: string;
 };
 type DocumentDraft = Pick<WorkDocument, 'title' | 'role' | 'status' | 'scope' | 'summary'>;
+/** Kept drafts that disagree with the version saved since: shown for a choice, never applied silently. */
+type DraftConflicts = { assignment?: StoredDraft<AssignmentDraft>; milestones?: StoredDraft<LifecycleStep[]> };
+type LiveDrafts = DraftConflicts & { document?: StoredDraft<DocumentFormDraft> };
+type KeptByThisPanel = 'assignment' | 'milestones' | 'document';
 const emptyDocument = (): DocumentDraft => ({ title: '', role: 'requirements', status: 'draft', scope: {}, summary: '' });
 const selectClass = 'mt-1 w-full rounded-md border border-border bg-background p-2 text-sm';
 const stages = ['investigate', 'design', 'implement', 'verify', 'review', 'release'] as const;
+const WORK_TYPES: Record<WorkGuidance['workType'], string> = { bug: 'Bug fix', feature: 'Feature', performance: 'Performance', refactor: 'Refactor', rewrite: 'Rewrite' };
+const SIZES: Record<WorkGuidance['size'], string> = { small: 'Small task', standard: 'Standard change', epic: 'Epic / multiple deliverables' };
+
+/** One part of the plan: what it says, with its pencil to edit it in place. */
+function PlanCard({ title, meta, action, children }: { title: string; meta?: ReactNode; action?: ReactNode; children?: ReactNode }) {
+  const id = useId();
+  return <section aria-labelledby={id} className="rounded-xl border border-border bg-card px-4 py-3">
+    <header className="mb-2 flex min-h-7 items-center gap-2">
+      <h3 id={id} className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
+      {meta}
+      <span className="flex-1" />
+      {action}
+    </header>
+    {children}
+  </section>;
+}
+
+/** The goal as a reader needs it: its opening, the rest on request, what it delivers and when it stops. */
+function GoalSummary({ guidance, scope }: { guidance: WorkGuidance; scope?: string }) {
+  const objective = guidance.assignment.objective?.trim() ?? '';
+  const opening = headline(objective);
+  const delivers = guidance.assignment.expectedOutput?.trim();
+  const stops = guidance.assignment.stopCondition?.trim();
+  const stage = guidance.assignment.stage;
+  return <div className="space-y-2">
+    <p className="text-[15px] font-semibold leading-snug text-foreground">{opening || <span className="font-normal text-muted-foreground">No goal yet. Say what this work is for.</span>}</p>
+    <p className="text-xs text-muted-foreground">{[stage ? stage[0]!.toUpperCase() + stage.slice(1) : '', WORK_TYPES[guidance.workType], SIZES[guidance.size], scope ? `For ${scope}` : ''].filter(Boolean).join(' · ')}</p>
+    {objective.length > opening.length && <details className="text-sm">
+      <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">The whole goal</summary>
+      <p className="mt-1.5 whitespace-pre-wrap text-sm text-foreground">{objective}</p>
+    </details>}
+    {(delivers || stops) && <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-sm">
+      {delivers && <><dt className="text-muted-foreground">Delivers</dt><dd className="line-clamp-3 whitespace-pre-wrap" title={delivers}>{delivers}</dd></>}
+      {stops && <><dt className="text-muted-foreground">Stops when</dt><dd className="line-clamp-3 whitespace-pre-wrap" title={stops}>{stops}</dd></>}
+    </dl>}
+  </div>;
+}
+
+const STEP_LOOK: Record<LifecycleStep['status'], { icon: typeof Circle; className: string; label: string }> = {
+  completed: { icon: CheckCircle2, className: 'text-[var(--state-done)]', label: 'done' },
+  verified: { icon: CheckCircle2, className: 'text-[var(--state-done)]', label: 'verified' },
+  in_progress: { icon: CircleDot, className: 'text-[var(--state-ai)]', label: 'in progress' },
+  blocked: { icon: CircleSlash, className: 'text-[var(--state-needs)]', label: 'blocked' },
+  pending: { icon: Circle, className: 'text-muted-foreground', label: 'not started' },
+};
+
+/** The milestones as a checklist, with the one being worked on marked. */
+function MilestoneList({ steps, current }: { steps: LifecycleStep[]; current?: string }) {
+  return <ol className="space-y-1">
+    {steps.map((step) => {
+      const look = STEP_LOOK[step.status] ?? STEP_LOOK.pending;
+      const Icon = look.icon;
+      const finished = step.status === 'completed' || step.status === 'verified';
+      return <li key={step.id} className="flex items-start gap-2 text-sm">
+        <Icon aria-hidden="true" className={`mt-0.5 size-4 shrink-0 ${look.className}`} />
+        <span className={`min-w-0 flex-1 ${finished ? 'text-muted-foreground' : 'text-foreground'}`}>{step.title || 'Untitled milestone'}<span className="sr-only">, {look.label}</span></span>
+        {step.id === current && !finished && <span className="state-chip shrink-0" data-tone="ai">Now</span>}
+      </li>;
+    })}
+  </ol>;
+}
 
 export function WorkspaceWorkPanel({ workspaceId, onPlanChanged, readOnly = false }: { workspaceId: string; onPlanChanged: () => void; /** Archived: show the record, change nothing. */ readOnly?: boolean }) {
   const [context, setContext] = useState<WorkContext | null>(null);
   const [draft, setDraft] = useState<WorkGuidance | null>(null);
   const [steps, setSteps] = useState<LifecycleStep[]>([]);
-  const [panel, setPanel] = useState<'assignment' | 'documents' | 'milestones' | 'notes'>('assignment');
+  // Which part is being edited. None by default: the plan is read first, and edited one part at a time.
+  const [panel, setPanel] = useState<'assignment' | 'documents' | 'milestones' | 'notes' | null>(null);
   const [notesOpened, setNotesOpened] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -37,19 +111,105 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged, readOnly = fals
   const [content, setContent] = useState('');
   const [url, setUrl] = useState('');
   const [preview, setPreview] = useState<{ title: string; content?: string; location: string } | null>(null);
+  const [conflicts, setConflicts] = useState<DraftConflicts>({});
+  const [notKept, setNotKept] = useState<Record<KeptByThisPanel, boolean>>({ assignment: false, milestones: false, document: false });
+  const [saving, setSaving] = useState<BriefKind | null>(null);
+  const [notesState, setNotesState] = useState<DraftState>('saved');
+  // The latest unsaved edits, so a reload still finds them when this device cannot store drafts.
+  const live = useRef<LiveDrafts>({});
   const base = `/api/workspace/${encodeURIComponent(workspaceId)}`;
   const queryClient = useQueryClient();
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setError('');
     try {
-      const result = await apiFetch<WorkContext>(`${base}/work`);
-      setContext(result); setDraft(result.guidance); setSteps(result.lifecycle?.steps ?? []);
-    } catch (error) { setError(error instanceof Error ? error.message : 'Unable to load work brief.'); }
-  }, [base]);
-  useEffect(() => { void load(); }, [load]);
+      const result = await apiFetch<WorkContext>(`${base}/work`, { signal });
+      // Leaving the workspace aborts this load: a stale result must not touch state or the stored drafts of this workspace.
+      if (signal?.aborted) return;
+      let nextDraft = result.guidance;
+      let nextSteps = result.lifecycle?.steps ?? [];
+      const found: DraftConflicts = {};
+      const kept: string[] = [];
+      let nextForm: DocumentFormDraft | null = null;
+      if (!readOnly) {
+        const assignment = reconcileAssignment(live.current.assignment ?? readDraft('assignment', workspaceId), pickAssignment(result.guidance));
+        if (assignment.kind === 'restore') { nextDraft = { ...result.guidance, ...assignment.value }; kept.push('goal'); }
+        else if (assignment.kind === 'conflict') found.assignment = assignment.draft;
+        else clearDraft('assignment', workspaceId);
+        if (result.lifecycle) {
+          const milestones = reconcileMilestones(live.current.milestones ?? readDraft('milestones', workspaceId), result.lifecycle.steps);
+          if (milestones.kind === 'restore') { nextSteps = milestones.value; kept.push('milestone'); }
+          else if (milestones.kind === 'conflict') found.milestones = milestones.draft;
+          else clearDraft('milestones', workspaceId);
+        }
+        const form = reconcileDocumentForm(live.current.document ?? readDraft('document', workspaceId));
+        if (form.kind === 'restore') { nextForm = form.value; kept.push('source document'); }
+        else clearDraft('document', workspaceId);
+        // Delivery notes load in their own panel: open it so a kept draft is found, and flagged on its tab.
+        if (readDraft('notes', workspaceId)) setNotesOpened(true);
+      }
+      live.current = { ...found }; // A copy: the effects below write to it, and `found` becomes state.
+      setContext(result); setDraft(nextDraft); setSteps(nextSteps); setConflicts(found);
+      if (nextForm) { setDocument(nextForm.document); setSourceType(nextForm.sourceType); setContent(nextForm.content); setUrl(nextForm.url); setEditingDocumentId(null); }
+      if (kept.length) setMessage(`Unsaved ${kept.join(' and ')} edits kept. Save them, or discard them.`);
+      // Kept edits, and edits that clash with a newer save, are shown where they can be finished or settled.
+      if (found.assignment || kept.includes('goal')) setPanel('assignment');
+      else if (found.milestones || kept.includes('milestone')) setPanel('milestones');
+      else if (kept.includes('source document')) setPanel('documents');
+    } catch (error) {
+      if (signal?.aborted) return;
+      setError(error instanceof Error ? error.message : 'Unable to load work brief.');
+    }
+  }, [base, workspaceId, readOnly]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
 
-  const perform = async (operation: () => Promise<void>) => {
+  // Keep unsaved edits on this device as they are made, so leaving the workspace or reloading does not lose them.
+  // A pending conflict owns the stored draft until the user chooses.
+  useEffect(() => {
+    if (readOnly || !context || !draft || conflicts.assignment) return;
+    const saved = pickAssignment(context.guidance);
+    const mine = pickAssignment(draft);
+    if (sameAssignment(mine, saved)) {
+      live.current.assignment = undefined; clearDraft('assignment', workspaceId);
+      setNotKept((current) => current.assignment ? { ...current, assignment: false } : current);
+      return;
+    }
+    live.current.assignment = { base: saved, value: mine, savedAt: Date.now() };
+    const stored = writeDraft('assignment', workspaceId, saved, mine);
+    setNotKept((current) => current.assignment === !stored ? current : { ...current, assignment: !stored });
+  }, [readOnly, context, draft, conflicts.assignment, workspaceId]);
+  useEffect(() => {
+    if (readOnly || !context?.lifecycle || conflicts.milestones) return;
+    const saved = context.lifecycle.steps;
+    if (sameSteps(steps, saved)) {
+      live.current.milestones = undefined; clearDraft('milestones', workspaceId);
+      setNotKept((current) => current.milestones ? { ...current, milestones: false } : current);
+      return;
+    }
+    live.current.milestones = { base: saved, value: steps, savedAt: Date.now() };
+    const stored = writeDraft('milestones', workspaceId, saved, steps);
+    setNotKept((current) => current.milestones === !stored ? current : { ...current, milestones: !stored });
+  }, [readOnly, context, steps, conflicts.milestones, workspaceId]);
+  // The Add source document form has no saved version to clash with. Pasted source text may be sensitive, so it is kept per window only.
+  useEffect(() => {
+    if (readOnly || !context) return;
+    const form: DocumentFormDraft = { document, sourceType, content, url };
+    if (editingDocumentId || sameDocumentForm(form, emptyDocumentForm())) {
+      live.current.document = undefined; clearDraft('document', workspaceId);
+      setNotKept((current) => current.document ? { ...current, document: false } : current);
+      return;
+    }
+    live.current.document = { base: emptyDocumentForm(), value: form, savedAt: Date.now() };
+    const stored = writeDraft('document', workspaceId, emptyDocumentForm(), form);
+    setNotKept((current) => current.document === !stored ? current : { ...current, document: !stored });
+  }, [readOnly, context, document, sourceType, content, url, editingDocumentId, workspaceId]);
+
+  const perform = async (operation: () => Promise<void>, savingKind?: BriefKind) => {
     setBusy(true); setError(''); setMessage('');
+    if (savingKind) setSaving(savingKind);
     try {
       await operation();
       // The workspace header shows the stage and next milestone; keep it current.
@@ -57,7 +217,7 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged, readOnly = fals
       void queryClient.invalidateQueries({ queryKey: ['workspace-lifecycle', workspaceId] });
     }
     catch (error) { setError(error instanceof Error ? error.message : 'The operation failed.'); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setSaving(null); }
   };
   const savedMessage = (baseMessage: string, result: { contextRefreshed?: boolean; contextRefreshError?: string }) => {
     if (result.contextRefreshed === false) return `${baseMessage} Generated context refresh failed: ${result.contextRefreshError ?? 'run refresh and retry.'}`;
@@ -70,8 +230,8 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged, readOnly = fals
     const result = await apiFetch<WorkContext>(`${base}/work`, { method: 'PUT', body: JSON.stringify({
       revision: context.guidance.revision, workType: draft.workType, size: draft.size, assignment: draft.assignment,
     }) });
-    setContext(result); setDraft(result.guidance); setMessage(savedMessage('AI assignment saved.', result));
-  });
+    setContext(result); setDraft(result.guidance); setMessage(savedMessage('Goal saved.', result));
+  }, 'assignment');
   const saveDocument = () => perform(async () => {
     if (!context) return;
     const result = await apiFetch<WorkContext>(`${base}/work/documents${editingDocumentId ? `/${editingDocumentId}` : ''}`, {
@@ -90,7 +250,7 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged, readOnly = fals
     });
     setContext({ ...context, lifecycle: result.lifecycle }); setSteps(result.lifecycle.steps);
     onPlanChanged(); setMessage(savedMessage('Milestones saved. Visual Flow and the Markdown plan use these same steps.', result));
-  });
+  }, 'milestones');
   const removeMilestone = (stepId: string) => {
     const step = steps.find((candidate) => candidate.id === stepId);
     if (!step) return;
@@ -109,7 +269,25 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged, readOnly = fals
     setError('');
     setSteps(steps.filter((candidate) => candidate.id !== stepId));
   };
-  const assignmentDirty = draft && context && (draft.workType !== context.guidance.workType || draft.size !== context.guidance.size || JSON.stringify(draft.assignment) !== JSON.stringify(context.guidance.assignment));
+  const assignmentDirty = Boolean(draft && context && !sameAssignment(pickAssignment(draft), pickAssignment(context.guidance)));
+  const documentFormDirty = !sameDocumentForm({ document, sourceType, content, url }, emptyDocumentForm());
+  const milestonesDirty = Boolean(context?.lifecycle && !sameSteps(steps, context.lifecycle.steps));
+  const assignmentState: DraftState = conflicts.assignment ? 'conflict' : saving === 'assignment' ? 'saving' : assignmentDirty ? 'unsaved' : 'saved';
+  const milestonesState: DraftState = conflicts.milestones ? 'conflict' : saving === 'milestones' ? 'saving' : milestonesDirty ? 'unsaved' : 'saved';
+  const withoutConflict = (kind: BriefKind) => setConflicts((current) => ({ ...current, [kind]: undefined }));
+  // The saved version stays on screen until the user chooses, so a kept draft only ever replaces it deliberately.
+  const keepAssignmentDraft = () => {
+    if (!context || !conflicts.assignment) return;
+    setDraft({ ...context.guidance, ...mergeAssignmentDraft(conflicts.assignment, pickAssignment(context.guidance)) }); withoutConflict('assignment');
+    setMessage('Your edits are applied to the latest saved assignment. Review them, then save.');
+  };
+  const useSavedAssignment = () => { if (context) { setDraft(context.guidance); withoutConflict('assignment'); setMessage('Using the saved assignment. Your unsaved edits were discarded.'); } };
+  const keepMilestoneDraft = () => {
+    if (!conflicts.milestones || !context?.lifecycle) return;
+    setSteps(withSavedProgress(conflicts.milestones.value, context.lifecycle.steps)); withoutConflict('milestones');
+    setMessage('Your edits are applied to the latest saved milestones. Review them, then save.');
+  };
+  const useSavedMilestones = () => { if (context?.lifecycle) { setSteps(context.lifecycle.steps); withoutConflict('milestones'); setMessage('Using the saved milestones. Your unsaved edits were discarded.'); } };
   const draftFirstMilestone = () => {
     if (!context?.lifecycle || steps.length || assignmentDirty) return;
     const objective = context.guidance.assignment.objective.replace(/\s+/g, ' ').trim();
@@ -117,56 +295,106 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged, readOnly = fals
     setPanel('milestones');
     setMessage('First milestone drafted locally. Review its title and outcome, then save it when ready.');
   };
-  return <section className="mb-5 rounded-xl border border-border bg-card p-5 space-y-4" aria-label="Work brief and sources">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <h3 className="font-semibold">Work brief & sources</h3>
-      <Button size="sm" variant="outline" disabled={busy} onClick={() => void load()}>Reload brief</Button>
+  const copyGoal = () => void perform(async () => {
+    if (!context) return;
+    if (!await safeCopyToClipboard(context.assignment)) throw new Error('Could not copy the goal. Check browser clipboard permissions.');
+    setMessage('Goal copied, with the plan, ready to paste to an assistant.');
+  });
+  const readDocument = (id: string) => void perform(async () => {
+    const result = await apiFetch<{ document: WorkDocument; content?: string; location: string }>(`${base}/work/documents/${id}`);
+    setPreview({ title: result.document.title, content: result.content, location: result.location });
+  });
+  const close = (what: string) => <Button size="xs" variant="ghost" aria-label={`Done with ${what}`} onClick={() => setPanel(null)}>Done</Button>;
+  const edit = (label: string, target: NonNullable<typeof panel>) => <IconButton label={label} icon={<Pencil />} className="text-muted-foreground" onClick={() => { setPanel(target); if (target === 'notes') setNotesOpened(true); }} />;
+  const previewBox = preview && <div className="rounded-lg border border-border p-3 space-y-2"><div className="flex justify-between gap-2"><h4 className="text-sm font-semibold">{preview.title}</h4><Button size="sm" variant="ghost" onClick={() => setPreview(null)}>Close document</Button></div>
+    {preview.content !== undefined ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs">{preview.content}</pre> : <a className="text-sm text-primary underline" href={preview.location} target="_blank" rel="noopener noreferrer">Open source document</a>}
+  </div>;
+
+  return <section className="mb-5 space-y-3" aria-label="Work brief and sources">
+    <div className="flex items-center gap-0.5">
+      <p className="min-w-0 flex-1 text-xs text-muted-foreground">What this work is for and how far it is. Edit a part with its pencil.</p>
+      <IconButton label="Copy the goal for an assistant" icon={<Copy />} className="text-muted-foreground" disabled={busy || !context || Boolean(assignmentDirty)} onClick={copyGoal} />
+      <IconButton label="Reload the plan" icon={<RefreshCw />} className="text-muted-foreground" disabled={busy} onClick={() => void load()} />
     </div>
-    <p className="text-sm text-muted-foreground">Keep source documents here and set the AI’s current assignment. Add milestones only when this feature needs them.</p>
     {error && <p role="alert" className="text-sm text-destructive">{error} Your draft is kept. Reload to review the latest saved version.</p>}
     {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
-    {!context || !draft ? <p className="text-sm">{error ? 'Work brief unavailable.' : 'Loading work brief…'}</p> : <>
-      <div className="flex flex-wrap gap-2" aria-label="Brief sections">
-        {(['assignment', 'documents', 'milestones', 'notes'] as const).map((item) => <Button key={item} size="sm" variant={panel === item ? 'secondary' : 'ghost'} aria-pressed={panel === item} onClick={() => { setPanel(item); if (item === 'notes') setNotesOpened(true); }}>{item === 'assignment' ? 'AI assignment' : item === 'documents' ? 'Source documents' : item === 'milestones' ? (readOnly ? 'Milestones' : context.lifecycle?.steps.length ? 'Edit milestones' : 'Add milestones') : 'Delivery notes & questions'}</Button>)}
-      </div>
-      {notesOpened && <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0" hidden={panel !== 'notes'}><PlanningNotesPanel key={workspaceId} workspaceId={workspaceId} /></fieldset>}
-      {panel === 'assignment' && <div className="space-y-4">
-        <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0 space-y-4">
-        <div className="grid gap-3 sm:grid-cols-3">
-          <label className="text-sm">Work type<select aria-label="Work type" className={selectClass} value={draft.workType} onChange={(event) => setDraft({ ...draft, workType: event.target.value as WorkGuidance['workType'] })}>
-            {(['bug', 'feature', 'performance', 'refactor', 'rewrite'] as const).map((value) => <option key={value} value={value}>{value === 'bug' ? 'Bug fix' : value[0].toUpperCase() + value.slice(1)}</option>)}
-          </select></label>
-          <label className="text-sm">Size<select aria-label="Size" className={selectClass} value={draft.size} onChange={(event) => setDraft({ ...draft, size: event.target.value as WorkGuidance['size'] })}>
-            <option value="small">Small task</option><option value="standard">Standard change</option><option value="epic">Epic / multiple deliverables</option>
-          </select></label>
-          <label className="text-sm">Current stage<select aria-label="Current stage" className={selectClass} value={draft.assignment.stage} onChange={(event) => patchAssignment({ stage: event.target.value as WorkGuidance['assignment']['stage'] })}>
-            {stages.map((stage) => <option key={stage} value={stage}>{stage[0].toUpperCase() + stage.slice(1)}</option>)}
-          </select></label>
-        </div>
-        <p className="text-xs text-muted-foreground">Work type and size describe the task; they do not reset progress. Edit milestones to adapt the plan.</p>
-        {Boolean(context.lifecycle?.steps.length) && <label className="block text-sm">Assignment scope<select aria-label="Assignment scope" className={selectClass} value={draft.assignment.milestoneId ?? ''} onChange={(event) => patchAssignment({ milestoneId: event.target.value || undefined })}>
-          <option value="">Whole workspace</option>{milestoneOptions}
-        </select></label>}
-        <label className="block text-sm">Current objective<Textarea className="mt-1" value={draft.assignment.objective} onChange={(event) => patchAssignment({ objective: event.target.value })} placeholder="Investigate why invoice totals differ from line items." /></label>
-        <label className="block text-sm">Expected output<Textarea className="mt-1" value={draft.assignment.expectedOutput} onChange={(event) => patchAssignment({ expectedOutput: event.target.value })} placeholder="A reproduction, likely cause, and proposed test plan." /></label>
-        <label className="block text-sm">Stop when<Textarea className="mt-1" value={draft.assignment.stopCondition} onChange={(event) => patchAssignment({ stopCondition: event.target.value })} placeholder="The proposal is ready for review. Stop before implementation." /></label>
-        </fieldset>
-        <div className="flex flex-wrap gap-2">
-          {!readOnly && <Button disabled={busy} onClick={() => void saveAssignment()}>Save AI assignment</Button>}
-          <Button variant="outline" disabled={busy || Boolean(assignmentDirty)} onClick={() => void perform(async () => {
-            if (!await safeCopyToClipboard(context.assignment)) throw new Error('Could not copy the AI assignment. Check browser clipboard permissions.');
-            setMessage('AI assignment copied.');
-          })}>Copy AI assignment</Button>
-        </div>
-        {assignmentDirty && <p className="text-xs text-muted-foreground">Save your changes before copying the assignment.</p>}
-        {!steps.length && !readOnly && <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
-          <h4 className="text-sm font-semibold">No milestones saved yet</h4>
-          <p className="text-xs text-muted-foreground">Turn the current assignment into a first reviewable outcome. The draft stays on this page until you save it; saving creates a pending milestone and does not start work.</p>
-          <Button size="sm" variant="outline" disabled={busy || !context.lifecycle || Boolean(assignmentDirty)} onClick={draftFirstMilestone}>Draft first milestone</Button>
-          {assignmentDirty && <p className="text-xs text-muted-foreground">Save the AI assignment before drafting from it.</p>}
+    {!context || !draft ? <p className="text-sm">{error ? 'The plan is unavailable.' : 'Loading the plan…'}</p> : <>
+      {conflicts.assignment && <DraftConflictNotice noun="goal" differences={assignmentConflicts(conflicts.assignment, pickAssignment(context.guidance))} onKeep={keepAssignmentDraft} onUseSaved={useSavedAssignment} />}
+      {conflicts.milestones && context.lifecycle && <DraftConflictNotice noun="milestones" differences={stepChanges(conflicts.milestones.value, context.lifecycle.steps)} onKeep={keepMilestoneDraft} onUseSaved={useSavedMilestones} />}
+
+      <PlanCard title="Goal" action={panel === 'assignment' ? close('the goal') : !readOnly && edit('Edit the goal', 'assignment')}
+        meta={!readOnly && panel !== 'assignment' && assignmentState !== 'saved' ? <DraftStateLabel state={assignmentState} kept={!notKept.assignment} /> : null}>
+        {panel === 'assignment' ? <div className="space-y-4">
+          <fieldset disabled={readOnly || Boolean(conflicts.assignment)} className="m-0 min-w-0 border-0 p-0 space-y-4">
+          <label className="block text-sm">Current objective<Textarea className="mt-1" value={draft.assignment.objective} onChange={(event) => patchAssignment({ objective: event.target.value })} placeholder="Investigate why invoice totals differ from line items." /></label>
+          <label className="block text-sm">Expected output<Textarea className="mt-1" value={draft.assignment.expectedOutput} onChange={(event) => patchAssignment({ expectedOutput: event.target.value })} placeholder="A reproduction, likely cause, and proposed test plan." /></label>
+          <label className="block text-sm">Stop when<Textarea className="mt-1" value={draft.assignment.stopCondition} onChange={(event) => patchAssignment({ stopCondition: event.target.value })} placeholder="The proposal is ready for review. Stop before implementation." /></label>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="text-sm">Current stage<select aria-label="Current stage" className={selectClass} value={draft.assignment.stage} onChange={(event) => patchAssignment({ stage: event.target.value as WorkGuidance['assignment']['stage'] })}>
+              {stages.map((stage) => <option key={stage} value={stage}>{stage[0].toUpperCase() + stage.slice(1)}</option>)}
+            </select></label>
+            <label className="text-sm">Work type<select aria-label="Work type" className={selectClass} value={draft.workType} onChange={(event) => setDraft({ ...draft, workType: event.target.value as WorkGuidance['workType'] })}>
+              {(['bug', 'feature', 'performance', 'refactor', 'rewrite'] as const).map((value) => <option key={value} value={value}>{WORK_TYPES[value]}</option>)}
+            </select></label>
+            <label className="text-sm">Size<select aria-label="Size" className={selectClass} value={draft.size} onChange={(event) => setDraft({ ...draft, size: event.target.value as WorkGuidance['size'] })}>
+              <option value="small">{SIZES.small}</option><option value="standard">{SIZES.standard}</option><option value="epic">{SIZES.epic}</option>
+            </select></label>
+          </div>
+          {Boolean(context.lifecycle?.steps.length) && <label className="block text-sm">Assignment scope<select aria-label="Assignment scope" className={selectClass} value={draft.assignment.milestoneId ?? ''} onChange={(event) => patchAssignment({ milestoneId: event.target.value || undefined })}>
+            <option value="">Whole workspace</option>{milestoneOptions}
+          </select></label>}
+          <p className="text-xs text-muted-foreground">The assistant reads this as its assignment. Type and size describe the work; changing them does not reset progress.</p>
+          </fieldset>
+          <div className="flex flex-wrap items-center gap-2">
+            {!readOnly && <Button disabled={busy || Boolean(conflicts.assignment)} onClick={() => void saveAssignment()}>Save goal</Button>}
+            {!readOnly && assignmentDirty && !conflicts.assignment && <Button variant="ghost" disabled={busy} onClick={() => { setDraft(context.guidance); setMessage('Unsaved goal edits discarded.'); }}>Discard unsaved goal changes</Button>}
+            {!readOnly && <DraftStateLabel state={assignmentState} kept={!notKept.assignment} />}
+          </div>
+        </div> : <GoalSummary guidance={draft} scope={context.lifecycle?.steps.find((step) => step.id === draft.assignment.milestoneId)?.title} />}
+      </PlanCard>
+
+      <PlanCard title="Milestones" action={panel === 'milestones' ? close('the milestones') : !readOnly && edit(context.lifecycle?.steps.length || steps.length ? 'Edit milestones' : 'Add milestones', 'milestones')}
+        meta={<>{steps.length > 0 && <span className="text-xs text-muted-foreground">{steps.filter((step) => step.status === 'completed' || step.status === 'verified').length} of {steps.length} done</span>}
+          {!readOnly && panel !== 'milestones' && milestonesState !== 'saved' && <DraftStateLabel state={milestonesState} kept={!notKept.milestones} />}</>}>
+        {panel === 'milestones' ? <fieldset disabled={readOnly || Boolean(conflicts.milestones)} className="m-0 min-w-0 border-0 p-0 space-y-4">
+          <p className="text-sm text-muted-foreground">Milestones are optional and unique to this work. Name the outcomes you need, or remove them all to hide the flow.</p>
+          {!context.lifecycle?.steps.length && steps.length > 0 && <p className="text-xs text-muted-foreground">This milestone is an unsaved draft. Review its title and outcome; Save milestones creates it as pending and does not start work.</p>}
+  {steps.map((step, index) => <fieldset key={step.id} className="rounded-lg border border-border p-3 space-y-3">
+            <legend className="px-1 text-xs text-muted-foreground">Milestone {index + 1} · {step.status.replaceAll('_', ' ')}</legend>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => removeMilestone(step.id)}>Remove milestone {index + 1}</Button>
+            <label className="block text-sm">Milestone {index + 1} title<Input value={step.title} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, title: event.target.value } : item))} /></label>
+            <label className="block text-sm">Milestone {index + 1} outcome<Textarea value={step.description ?? ''} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, description: event.target.value } : item))} /></label>
+            <label className="block text-sm">Milestone {index + 1} branch (optional)<Input value={step.branch ?? ''} placeholder="feature/invoice-calculation" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, branch: event.target.value } : item))} /></label>
+            <label className="block text-sm">Milestone {index + 1} repository (optional)<Input value={step.repo ?? ''} placeholder="billing-api" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, repo: event.target.value } : item))} /></label>
+            <label className="block text-sm">Milestone {index + 1} work item / PR (optional)<Input value={step.workItem ?? ''} placeholder="PBI ID or URL" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, workItem: event.target.value } : item))} /></label>
+            <label className="block text-sm">Milestone {index + 1} unblock condition (optional)<Input value={step.unblockCondition ?? ''} placeholder="Dependency or decision needed before starting" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, unblockCondition: event.target.value } : item))} /></label>
+            <fieldset className="space-y-2"><legend className="mb-2 text-sm">Milestone {index + 1} dependencies</legend>
+              {steps.filter((item) => item.id !== step.id).map((item) => <label key={item.id} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={Boolean(step.dependsOn?.includes(item.id))} onChange={(event) => setSteps(steps.map((candidate) => candidate.id === step.id ? {
+                  ...candidate, dependsOn: event.target.checked ? [...(candidate.dependsOn ?? []), item.id] : (candidate.dependsOn ?? []).filter((id) => id !== item.id),
+                } : candidate))} />{item.title || 'Untitled milestone'}
+              </label>)}
+            </fieldset>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(step.requiresVerification || step.verificationCommand)} disabled={step.status === 'completed'} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, requiresVerification: event.target.checked, ...(!event.target.checked ? { verificationCommand: '' } : {}) } : item))} />Verify before completing milestone {index + 1}</label>
+            {(step.requiresVerification || step.verificationCommand) && <label className="block text-sm">Milestone {index + 1} verification command (optional)<Input value={step.verificationCommand ?? ''} disabled={step.status === 'completed'} placeholder="Uses the workspace test command unless overridden" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, verificationCommand: event.target.value } : item))} /></label>}
+            {(step.requiresVerification || step.verificationCommand) && <label className="block text-sm">Milestone {index + 1} verification time limit in minutes (optional)<Input type="number" min={1} max={120} step={1} value={step.verificationTimeoutSeconds ? Math.round(step.verificationTimeoutSeconds / 60) : ''} placeholder="30" onChange={(event) => {
+              const minutes = Number.parseInt(event.target.value, 10);
+              setSteps(steps.map((item) => item.id === step.id ? { ...item, verificationTimeoutSeconds: Number.isFinite(minutes) && minutes > 0 ? Math.min(minutes, 120) * 60 : undefined } : item));
+            }} /></label>}
+          </fieldset>)}
+          {!readOnly && <div className="flex flex-wrap items-center gap-2"><Button variant="outline" disabled={busy || steps.length >= 100} onClick={() => setSteps([...steps, { id: `milestone-${crypto.randomUUID()}`, title: '', status: 'pending', dependsOn: [] }])}>Add milestone</Button><Button disabled={busy || steps.some((step) => !step.title.trim())} onClick={() => void saveMilestones()}>Save milestones</Button>
+            {milestonesDirty && <Button variant="ghost" disabled={busy} onClick={() => { setSteps(context.lifecycle?.steps ?? []); setMessage('Unsaved milestone edits discarded.'); }}>Discard unsaved milestone changes</Button>}
+            <DraftStateLabel state={milestonesState} kept={!notKept.milestones} /></div>}
+        </fieldset> : steps.length ? <MilestoneList steps={steps} current={context.lifecycle?.currentStepId} /> : <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">No milestones. Most work does not need them; add some when it has steps worth checking off.</p>
+          {!readOnly && <Button size="sm" variant="outline" disabled={busy || !context.lifecycle || Boolean(assignmentDirty)} onClick={draftFirstMilestone}>Draft first milestone</Button>}
+          {!readOnly && assignmentDirty && <p className="text-xs text-muted-foreground">Save the goal before drafting from it.</p>}
         </div>}
-      </div>}
-      {panel === 'documents' && <div className="space-y-4">
+      </PlanCard>
+
+      <PlanCard title="Sources" action={panel === 'documents' ? close('the sources') : !readOnly && edit('Edit sources', 'documents')}
+        meta={context.guidance.documents.length > 0 && <span className="text-xs text-muted-foreground">{context.guidance.documents.length}</span>}>
+        {panel === 'documents' ? <div className="space-y-4">
         <p className="text-sm text-muted-foreground">Attach Markdown/text or link to a document. Approved requirements define intended behavior; drafts remain proposals. Superseded documents stay available as history.</p>
         {context.projectId && <p className="text-xs text-muted-foreground">Project sources are stored in the workspace where you add them. Keep that workspace while sources are active; supersede or copy them elsewhere before deleting it.</p>}
         <ul className="space-y-2">{context.guidance.documents.map((doc) => <li key={doc.id} className="rounded-lg border border-border p-3">
@@ -189,9 +417,7 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged, readOnly = fals
           </div>)}
         </div>}
         {!context.guidance.documents.length && <p className="text-sm text-muted-foreground">No documents yet. Add only the sources this work needs.</p>}
-        {preview && <div className="rounded-lg border border-border p-3 space-y-2"><div className="flex justify-between gap-2"><h4 className="text-sm font-semibold">{preview.title}</h4><Button size="sm" variant="ghost" onClick={() => setPreview(null)}>Close document</Button></div>
-          {preview.content !== undefined ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs">{preview.content}</pre> : <a className="text-sm text-primary underline" href={preview.location} target="_blank" rel="noopener noreferrer">Open source document</a>}
-        </div>}
+        {previewBox}
         {!readOnly && <div className="border-t border-border pt-4 space-y-3">
           <h4 className="font-medium text-sm">{editingDocumentId ? 'Edit document labels' : 'Add source document'}</h4>
           <label className="block text-sm">Document title<Input value={document.title} onChange={(event) => setDocument({ ...document, title: event.target.value })} /></label>
@@ -224,37 +450,27 @@ export function WorkspaceWorkPanel({ workspaceId, onPlanChanged, readOnly = fals
           <label className="block text-sm">Owner summary (optional)<Textarea value={document.summary} onChange={(event) => setDocument({ ...document, summary: event.target.value })} placeholder="Highlight what matters for this task. The original remains available." /></label>
           <div className="flex gap-2"><Button disabled={busy || !document.title.trim() || (!editingDocumentId && !(sourceType === 'link' ? url.trim() : content.trim()))} onClick={() => void saveDocument()}>{editingDocumentId ? 'Save document labels' : 'Add document'}</Button>
             {editingDocumentId && <Button variant="ghost" onClick={() => { setEditingDocumentId(null); setDocument(emptyDocument()); }}>Cancel document edit</Button>}
+            {!editingDocumentId && documentFormDirty && <Button variant="ghost" disabled={busy} onClick={() => { setDocument(emptyDocument()); setSourceType('text'); setContent(''); setUrl(''); setMessage('Unsaved source document discarded.'); }}>Discard unsaved source document</Button>}
+            {!editingDocumentId && documentFormDirty && <DraftStateLabel state="unsaved" kept={!notKept.document} keptText="Unsaved — kept until you close this window" />}
           </div>
         </div>}
-      </div>}
-      {panel === 'milestones' && <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0 space-y-4">
-        <p className="text-sm text-muted-foreground">Milestones are optional and unique to this feature. Name the outcomes you need, or remove all milestones to hide the flow.</p>
-        {!context.lifecycle?.steps.length && steps.length > 0 && <p className="text-xs text-muted-foreground">This milestone is an unsaved draft. Review its title and outcome; Save milestones creates it as pending and does not start work.</p>}
-        {steps.map((step, index) => <fieldset key={step.id} className="rounded-lg border border-border p-3 space-y-3">
-          <legend className="px-1 text-xs text-muted-foreground">Milestone {index + 1} · {step.status.replaceAll('_', ' ')}</legend>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => removeMilestone(step.id)}>Remove milestone {index + 1}</Button>
-          <label className="block text-sm">Milestone {index + 1} title<Input value={step.title} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, title: event.target.value } : item))} /></label>
-          <label className="block text-sm">Milestone {index + 1} outcome<Textarea value={step.description ?? ''} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, description: event.target.value } : item))} /></label>
-          <label className="block text-sm">Milestone {index + 1} branch (optional)<Input value={step.branch ?? ''} placeholder="feature/invoice-calculation" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, branch: event.target.value } : item))} /></label>
-          <label className="block text-sm">Milestone {index + 1} repository (optional)<Input value={step.repo ?? ''} placeholder="billing-api" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, repo: event.target.value } : item))} /></label>
-          <label className="block text-sm">Milestone {index + 1} work item / PR (optional)<Input value={step.workItem ?? ''} placeholder="PBI ID or URL" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, workItem: event.target.value } : item))} /></label>
-          <label className="block text-sm">Milestone {index + 1} unblock condition (optional)<Input value={step.unblockCondition ?? ''} placeholder="Dependency or decision needed before starting" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, unblockCondition: event.target.value } : item))} /></label>
-          <fieldset className="space-y-2"><legend className="mb-2 text-sm">Milestone {index + 1} dependencies</legend>
-            {steps.filter((item) => item.id !== step.id).map((item) => <label key={item.id} className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={Boolean(step.dependsOn?.includes(item.id))} onChange={(event) => setSteps(steps.map((candidate) => candidate.id === step.id ? {
-                ...candidate, dependsOn: event.target.checked ? [...(candidate.dependsOn ?? []), item.id] : (candidate.dependsOn ?? []).filter((id) => id !== item.id),
-              } : candidate))} />{item.title || 'Untitled milestone'}
-            </label>)}
-          </fieldset>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={Boolean(step.requiresVerification || step.verificationCommand)} disabled={step.status === 'completed'} onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, requiresVerification: event.target.checked, ...(!event.target.checked ? { verificationCommand: '' } : {}) } : item))} />Verify before completing milestone {index + 1}</label>
-          {(step.requiresVerification || step.verificationCommand) && <label className="block text-sm">Milestone {index + 1} verification command (optional)<Input value={step.verificationCommand ?? ''} disabled={step.status === 'completed'} placeholder="Uses the workspace test command unless overridden" onChange={(event) => setSteps(steps.map((item) => item.id === step.id ? { ...item, verificationCommand: event.target.value } : item))} /></label>}
-          {(step.requiresVerification || step.verificationCommand) && <label className="block text-sm">Milestone {index + 1} verification time limit in minutes (optional)<Input type="number" min={1} max={120} step={1} value={step.verificationTimeoutSeconds ? Math.round(step.verificationTimeoutSeconds / 60) : ''} placeholder="30" onChange={(event) => {
-            const minutes = Number.parseInt(event.target.value, 10);
-            setSteps(steps.map((item) => item.id === step.id ? { ...item, verificationTimeoutSeconds: Number.isFinite(minutes) && minutes > 0 ? Math.min(minutes, 120) * 60 : undefined } : item));
-          }} /></label>}
-        </fieldset>)}
-        {!readOnly && <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || steps.length >= 100} onClick={() => setSteps([...steps, { id: `milestone-${crypto.randomUUID()}`, title: '', status: 'pending', dependsOn: [] }])}>Add milestone</Button><Button disabled={busy || steps.some((step) => !step.title.trim())} onClick={() => void saveMilestones()}>Save milestones</Button></div>}
-      </fieldset>}
+      </div> : <div className="space-y-2">
+          {context.guidance.documents.length || context.sharedDocuments?.length ? <ul className="space-y-1">
+            {[...context.guidance.documents, ...(context.sharedDocuments ?? [])].map((doc) => <li key={doc.id} className="flex items-center gap-2 text-sm">
+              <FileText aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">{doc.title}<span className="ml-2 text-xs text-muted-foreground">{doc.role} · {doc.status}</span></span>
+              <IconButton label={`Read ${doc.title}`} icon={<Eye />} className="text-muted-foreground" disabled={busy} onClick={() => readDocument(doc.id)} />
+            </li>)}
+          </ul> : <p className="text-sm text-muted-foreground">None yet. Add the requirements, designs or evidence the assistant should follow.</p>}
+          {previewBox}
+        </div>}
+      </PlanCard>
+
+      <PlanCard title="Notes & questions" action={panel === 'notes' ? close('the notes') : edit(readOnly ? 'Show notes and questions' : 'Edit notes and questions', 'notes')}
+        meta={notesState !== 'saved' && <span data-notes-state={notesState} className="text-xs text-muted-foreground">{notesState === 'conflict' ? 'Conflict' : 'Unsaved'}</span>}>
+        {panel !== 'notes' && <p className="text-sm text-muted-foreground">Delivery order, open questions with their owners, and decisions put off for later.</p>}
+        {notesOpened && <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0" hidden={panel !== 'notes'}><PlanningNotesPanel key={workspaceId} workspaceId={workspaceId} readOnly={readOnly} onStateChange={setNotesState} /></fieldset>}
+      </PlanCard>
     </>}
   </section>;
 }

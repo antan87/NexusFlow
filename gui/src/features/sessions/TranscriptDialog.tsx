@@ -36,7 +36,11 @@ const assistantLabel = (assistant: string) =>
       ? 'Claude Code'
       : assistant === 'codex'
         ? 'OpenAI Codex'
-        : 'GitHub Copilot';
+        : assistant === 'pi'
+          ? 'Pi'
+          : assistant === 'cursor'
+            ? 'Cursor'
+            : 'GitHub Copilot';
 
 const assistantTone = (assistant: string) =>
   assistant === 'claude' ? 'warning' : assistant === 'codex' ? 'success' : assistant === 'antigravity' ? 'accent' : 'info';
@@ -53,6 +57,8 @@ const getResumeCommand = (assistant: string, sessionId: string): string => {
       return `copilot --resume ${sessionId}`;
     case 'cursor':
       return `cursor-agent --resume ${sessionId}`;
+    case 'pi':
+      return `pi --session ${sessionId}`;
     default:
       return `agy --conversation ${sessionId}`;
   }
@@ -196,7 +202,7 @@ export function TranscriptDialog({
             transcript.map((msg, idx) => (
               <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                 <div className="mb-1 px-1 text-[10px] text-muted-foreground">
-                  {msg.role === 'user' ? 'Developer' : activeSession.assistant === 'antigravity' ? 'Antigravity' : activeSession.assistant === 'claude' ? 'Claude' : activeSession.assistant === 'codex' ? 'Codex' : 'Copilot'}
+                  {msg.role === 'user' ? 'Developer' : activeSession.assistant === 'antigravity' ? 'Antigravity' : activeSession.assistant === 'claude' ? 'Claude' : activeSession.assistant === 'codex' ? 'Codex' : activeSession.assistant === 'pi' ? 'Pi' : activeSession.assistant === 'cursor' ? 'Cursor' : 'Copilot'}
                   {msg.timestamp && ` • ${new Date(msg.timestamp).toLocaleTimeString()}`}
                 </div>
                 <div className={`max-w-[85%] rounded-xl border px-4 py-3 text-xs leading-relaxed ${

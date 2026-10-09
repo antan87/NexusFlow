@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Square, RotateCw, AlertTriangle, Terminal, Maximize2, Minimize2, Trash2 } from 'lucide-react';
+import { Play, Square, RotateCw, AlertTriangle, Terminal, Maximize2, Minimize2, Trash2, Copy, RefreshCw } from 'lucide-react';
 import type { Feature } from '../../types.js';
 import { Button } from '../../components/ui/button.js';
 import { Spinner } from '../../components/ui/spinner.js';
@@ -7,6 +7,7 @@ import { StatusBadge } from '../../components/ui/status-badge.js';
 import { cn } from '../../lib/utils.js';
 import { useOrchestratorAction, useServiceAction, useWorkspaceServices } from '../../lib/api/queries.js';
 import { useServiceLogStream } from './useServiceLogStream.js';
+import { safeCopyToClipboard } from '../../lib/clipboard.js';
 
 export function ServiceConsole({ ws }: { ws: Feature }) {
   const wsId = ws.branchName;
@@ -19,6 +20,12 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
   const runningServices = useMemo(() => data?.runningState ?? [], [data]);
   const orchTools = data?.orchestrationTools ?? [];
   const runningOrchestrators = useMemo(() => data?.runningOrchestrators ?? [], [data]);
+  // Start All runs only what the repositories declare; guesses start one at a time.
+  const declared = useMemo(() => services.filter((s) => s.declared), [services]);
+  const guessedCount = services.length - declared.length;
+  const suggestions = data?.suggestions ?? [];
+  const failures = useMemo(() => new Map((data?.failures ?? []).map((f) => [f.name, f.reason])), [data]);
+  const [copied, setCopied] = useState<string | null>(null);
   // pm2-mode orchestrators expose a tailable log source (the server-assigned
   // `logName`); one-shot tools (compose up -d) have no streamable log.
   const orchLogs = useMemo(
@@ -107,14 +114,42 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
         </div>
       )}
 
-      {!servicesQuery.isLoading && !servicesQuery.isError && services.length === 0 && orchTools.length === 0 && (
-        <div className="rounded-md border border-border/80 bg-card p-6 text-center surface-card">
-          <Terminal size={24} className="mx-auto mb-2 text-muted-foreground" />
-          <h4 className="text-xs font-bold text-foreground">No Services Detected</h4>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            ContextSpace scans for runnable background services in <code className="font-mono text-[10px]">package.json</code> scripts (such as <code className="font-mono text-[10px]">start</code>, <code className="font-mono text-[10px]">dev</code>), <code className="font-mono text-[10px]">docker-compose.yml</code>, or <code className="font-mono text-[10px]">Procfile</code>.
-          </p>
-        </div>
+      {!servicesQuery.isLoading && !servicesQuery.isError && (declared.length === 0 || guessedCount > 0) && (
+        <section aria-labelledby="declare-services-heading" className="mb-4 rounded-md border border-border/80 bg-card p-4 surface-card">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h4 id="declare-services-heading" className="flex items-center gap-2 text-xs font-bold text-foreground">
+                <Terminal size={14} className="text-muted-foreground" />
+                {declared.length > 0 ? 'Some services are not declared' : services.length ? 'No declared services' : 'No services found'}
+              </h4>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Start All runs the processes a repository declares in a <code className="font-mono text-[10px]">Procfile.dev</code> at its root, one <code className="font-mono text-[10px]">name: command</code> per line.{' '}
+                {guessedCount > 0
+                  ? `${guessedCount} service${guessedCount === 1 ? ' was' : 's were'} guessed from project files${declared.length > 0 ? ' and will not start with the declared ones' : ''}; start ${guessedCount === 1 ? 'it' : 'them'} one at a time below, or review this suggestion, keep only processes that should run while you work, and save it.`
+                  : 'Add one, then rescan.'}
+              </p>
+            </div>
+            <Button size="xs" variant="outline" disabled={servicesQuery.isFetching} onClick={() => void servicesQuery.refetch()}>
+              <RefreshCw size={12} /> Rescan
+            </Button>
+          </div>
+          {(suggestions.length ? suggestions : [{ file: 'Procfile.dev', content: 'web: npm run dev\n' }]).map((suggestion) => (
+            <div key={suggestion.file} className="mt-3 rounded-md border border-border/60 bg-muted/30">
+              <div className="flex items-center justify-between gap-2 border-b border-border/60 px-2 py-1">
+                <code className="truncate font-mono text-[10px] text-muted-foreground" title={suggestion.file}>{suggestion.file}</code>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  aria-label={`Copy suggested ${suggestion.file}`}
+                  onClick={() => void safeCopyToClipboard(suggestion.content).then((ok) => setCopied(ok ? suggestion.file : null))}
+                >
+                  <Copy size={12} /> {copied === suggestion.file ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+              <pre className="overflow-x-auto p-2 font-mono text-[10px] text-foreground">{suggestion.content}</pre>
+            </div>
+          ))}
+        </section>
       )}
 
       {/* Orchestration tools — actionable rows. */}
@@ -175,8 +210,13 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
           {isAnyRunning ? `${runningNames.size} process${runningNames.size === 1 ? '' : 'es'} active` : 'All processes offline'}
         </div>
         <div className="flex gap-2">
-          <Button size="sm" disabled={isAnyRunning || pending} onClick={() => serviceAction.mutate({ action: 'start' })}>
-            <Play size={13} /> Start All Services
+          <Button
+            size="sm"
+            disabled={declared.length === 0 || isAnyRunning || pending}
+            title={declared.length === 0 ? 'Nothing is declared yet. Add a Procfile.dev, or start a guessed service on its own.' : undefined}
+            onClick={() => serviceAction.mutate({ action: 'start' })}
+          >
+            <Play size={13} /> Start declared services
           </Button>
           <Button size="sm" variant="destructive" disabled={!isAnyRunning || pending} onClick={() => serviceAction.mutate({ action: 'stop' })}>
             <Square size={13} /> Stop All
@@ -196,6 +236,7 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
               {services.map((svc) => {
                 const isSelected = selectedLogService === svc.name;
                 const running = runningNames.has(svc.name);
+                const failure = running ? undefined : failures.get(svc.name);
                 return (
                   <div
                     key={svc.name}
@@ -209,8 +250,9 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex min-w-0 items-center gap-2">
-                        <span className={`h-2 w-2 shrink-0 rounded-full ${running ? 'bg-success' : 'bg-destructive'}`} />
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${running ? 'bg-success' : failure ? 'bg-destructive' : 'bg-muted-foreground/40'}`} />
                         <span className="truncate text-xs font-bold">{svc.name}</span>
+                        <span className="sr-only">{running ? ', running' : failure ? ', not started' : ', stopped'}</span>
                       </div>
                       <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         {running ? (
@@ -247,14 +289,30 @@ export function ServiceConsole({ ws }: { ws: Feature }) {
                         )}
                       </div>
                     </div>
-                    {svc.port ? (
-                      <span className="mt-2 w-fit rounded border border-border bg-background px-2 py-0.5 font-mono text-[9px] text-muted-foreground">
-                        Port: {svc.port}
-                      </span>
-                    ) : null}
-                    <code className="mt-2 block truncate rounded border border-border bg-muted/40 p-1.5 font-mono text-[9px] text-muted-foreground">
-                      {svc.command} {svc.args.join(' ')}
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      {svc.declared ? (
+                        <StatusBadge tone="success" dot={false} title="Declared by the repository">
+                          {svc.declaredIn ? `${svc.declaredIn.file}:${svc.declaredIn.line}` : 'Declared'}
+                        </StatusBadge>
+                      ) : (
+                        <StatusBadge tone="warning" dot={false} title="Guessed from project files; Start All does not run it">
+                          Guessed from {svc.source}
+                        </StatusBadge>
+                      )}
+                      {svc.port ? (
+                        <span className="w-fit rounded border border-border bg-background px-2 py-0.5 font-mono text-[9px] text-muted-foreground">
+                          Port: {svc.port}
+                        </span>
+                      ) : null}
+                    </div>
+                    <code className="mt-2 block truncate rounded border border-border bg-muted/40 p-1.5 font-mono text-[9px] text-muted-foreground" title={svc.cwd}>
+                      {svc.display ?? `${svc.command} ${svc.args.join(' ')}`}
                     </code>
+                    {failure && (
+                      <p className="mt-2 break-words text-[10px] text-destructive" data-testid="service-failure">
+                        {failure}
+                      </p>
+                    )}
                   </div>
                 );
               })}

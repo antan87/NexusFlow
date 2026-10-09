@@ -4,6 +4,8 @@
 //
 //   node scripts/release-guard.mjs ref --ref <ref> --default-branch <branch>
 //   node scripts/release-guard.mjs checks --sha <sha> --repo <owner/name> [--config <path>]
+//   node scripts/release-guard.mjs version --version <X.Y.Z> --tags-file <git ls-remote --tags --refs output>
+//   node scripts/release-guard.mjs pin --expected <sha> --actual <sha>
 //
 // `checks` reads GH_TOKEN (or GITHUB_TOKEN) and fails closed when the check-run
 // evidence cannot be fetched completely.
@@ -11,7 +13,13 @@
 import { appendFileSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 
-import { evaluateDispatchRef, evaluateRequiredChecks } from './release-guard-core.mjs';
+import {
+  evaluateDispatchRef,
+  evaluateExpectedSha,
+  evaluateRequiredChecks,
+  evaluateVersionOrder,
+  parseRemoteTags,
+} from './release-guard-core.mjs';
 
 const DEFAULT_CONFIG = '.github/release-required-checks.json';
 const MAX_PAGES = 20;
@@ -25,6 +33,10 @@ const { values: args } = parseArgs({
     sha: { type: 'string' },
     repo: { type: 'string' },
     config: { type: 'string', default: DEFAULT_CONFIG },
+    version: { type: 'string' },
+    'tags-file': { type: 'string' },
+    expected: { type: 'string' },
+    actual: { type: 'string' },
   },
 });
 
@@ -33,11 +45,21 @@ try {
     report(evaluateDispatchRef({ ref: args.ref, defaultBranch: args['default-branch'] }), 'Release ref');
   } else if (command === 'checks') {
     await checks();
+  } else if (command === 'version') {
+    versionOrder();
+  } else if (command === 'pin') {
+    report(evaluateExpectedSha({ expected: args.expected, actual: args.actual }), 'Release source pin');
   } else {
-    fail([`Unknown command "${command ?? ''}". Use "ref" or "checks".`]);
+    fail([`Unknown command "${command ?? ''}". Use "ref", "checks", "version" or "pin".`]);
   }
 } catch (error) {
   fail([`Release guard could not complete: ${error.message}`]);
+}
+
+function versionOrder() {
+  if (!args['tags-file']) throw new Error('--tags-file is required.');
+  const tags = parseRemoteTags(readFileSync(args['tags-file'], 'utf8'));
+  report(evaluateVersionOrder({ version: args.version, tags }), `Release version ${args.version}`);
 }
 
 async function checks() {

@@ -1,0 +1,177 @@
+{
+  "tier": "L",
+  "samples": [
+    {
+      "backendReadyMs": 1585,
+      "workspaces": {
+        "ms": 70,
+        "status": 200,
+        "processes": 0,
+        "git": 0,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      },
+      "status page 1": {
+        "ms": 4110,
+        "status": 200,
+        "processes": 73,
+        "git": 72,
+        "historyFullReads": 0,
+        "historyMiB": 600
+      },
+      "ai-detect": {
+        "ms": 255,
+        "status": 200,
+        "processes": 6,
+        "git": 0,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      },
+      "editor-detect": {
+        "ms": 12278,
+        "status": 200,
+        "processes": 10,
+        "git": 0,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      },
+      "launch-targets": {
+        "ms": 120002,
+        "status": "timed out after 120 s",
+        "processes": 11,
+        "git": 0,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      },
+      "repos": {
+        "ms": 173,
+        "status": 200,
+        "processes": 15,
+        "git": 15,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      },
+      "changes perf-ws-000": {
+        "ms": 380,
+        "status": 200,
+        "processes": 6,
+        "git": 6,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      },
+      "sessions perf-ws-000": {
+        "ms": 1080,
+        "status": 200,
+        "processes": 0,
+        "git": 0,
+        "historyFullReads": 103,
+        "historyMiB": 213.4
+      },
+      "sessions perf-ws-000 (repeat)": {
+        "ms": 906,
+        "status": 200,
+        "processes": 0,
+        "git": 0,
+        "historyFullReads": 103,
+        "historyMiB": 213.4
+      },
+      "plan perf-ws-000": {
+        "ms": 13,
+        "status": 200,
+        "processes": 0,
+        "git": 0,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      }
+    },
+    {
+      "backendReadyMs": 1326,
+      "workspaces": {
+        "ms": 30,
+        "status": 200,
+        "processes": 0,
+        "git": 0,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      },
+      "status page 1": {
+        "ms": 3242,
+        "status": 200,
+        "processes": 73,
+        "git": 72,
+        "historyFullReads": 0,
+        "historyMiB": 600
+      },
+      "ai-detect": {
+        "ms": 199,
+        "status": 200,
+        "processes": 6,
+        "git": 0,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      },
+      "editor-detect": {
+        "ms": 7458,
+        "status": 200,
+        "processes": 10,
+        "git": 0,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      },
+      "launch-targets": {
+        "ms": 120001,
+        "status": "timed out after 120 s",
+        "processes": 11,
+        "git": 0,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      },
+      "repos": {
+        "ms": 141,
+        "status": 200,
+        "processes": 15,
+        "git": 15,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      },
+      "changes perf-ws-000": {
+        "ms": 321,
+        "status": 200,
+        "processes": 6,
+        "git": 6,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      },
+      "sessions perf-ws-000": {
+        "ms": 858,
+        "status": 200,
+        "processes": 0,
+        "git": 0,
+        "historyFullReads": 103,
+        "historyMiB": 213.4
+      },
+      "sessions perf-ws-000 (repeat)": {
+        "ms": 671,
+        "status": 200,
+        "processes": 0,
+        "git": 0,
+        "historyFullReads": 103,
+        "historyMiB": 213.4
+      },
+      "plan perf-ws-000": {
+        "ms": 3,
+        "status": 200,
+        "processes": 0,
+        "git": 0,
+        "historyFullReads": 0,
+        "historyMiB": 0
+      }
+    }
+  ],
+  "pm2": [
+    414,
+    408,
+    449
+  ],
+  "cpuProfile": "perf/results/cpuprof-L-1790629750491"
+}

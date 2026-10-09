@@ -54,7 +54,10 @@ test('CLI chat shows exact saved-session usage and quota without a passive launc
   await page.getByRole('menuitem', { name: 'Refresh usage' }).click();
   await openPaneOptions();
   await expect(usage).toContainText('6 requests remaining');
-  await page.getByRole('menuitem', { name: 'Continue a conversation…' }).click();
+  await page.keyboard.press('Escape');
+  // Saved conversations open in a tab of their own, beside the session that runs.
+  await chat.getByRole('button', { name: 'Start another CLI' }).click();
+  await page.getByRole('menuitem', { name: 'Continue a saved conversation…' }).click();
   const history = chat.getByRole('region', { name: 'Continue a conversation' });
   await expect(history.getByTestId('resume-session-row').filter({ hasText: saved.title })).toContainText('Input 1,000 · Output 240 · Cached input 300 tokens');
   await expect(history.getByTestId('resume-session-row').filter({ hasText: unknown.title })).toContainText('Token usage unavailable');

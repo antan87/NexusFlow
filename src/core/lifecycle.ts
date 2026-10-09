@@ -117,7 +117,11 @@ export async function getBranchFleet(workspacePath: string): Promise<BranchFleet
 /**
  * Loads or initializes the active lifecycle for a workspace.
  */
-export async function loadWorkspaceLifecycle(workspacePath: string): Promise<WorkspaceLifecycle> {
+export async function loadWorkspaceLifecycle(
+  workspacePath: string,
+  options: { includeFleet?: boolean } = {},
+): Promise<WorkspaceLifecycle> {
+  const includeFleet = options.includeFleet ?? true;
   const state = await loadWorkspaceState(workspacePath);
   const feature = await loadFeatureConfig(workspacePath);
 
@@ -138,11 +142,13 @@ export async function loadWorkspaceLifecycle(workspacePath: string): Promise<Wor
         });
       } finally { await release(); }
     }
-    // Refresh branch fleet asynchronously
-    try {
-      state.lifecycle.fleet = await getBranchFleet(workspacePath);
-    } catch {
-      // Best-effort
+    // Refresh branch fleet asynchronously. It can query remotes, so a caller that polls skips it.
+    if (includeFleet) {
+      try {
+        state.lifecycle.fleet = await getBranchFleet(workspacePath);
+      } catch {
+        // Best-effort
+      }
     }
     return state.lifecycle;
   }
@@ -160,10 +166,12 @@ export async function loadWorkspaceLifecycle(workspacePath: string): Promise<Wor
   }
 
   let fleet: BranchFleetMember[] = [];
-  try {
-    fleet = await getBranchFleet(workspacePath);
-  } catch {
-    // Best-effort
+  if (includeFleet) {
+    try {
+      fleet = await getBranchFleet(workspacePath);
+    } catch {
+      // Best-effort
+    }
   }
 
   const lifecycle: WorkspaceLifecycle = {
@@ -241,12 +249,20 @@ export async function advanceLifecycleStep(
     Object.assign(currentStep, step);
     if (action === 'start') {
       currentStep.status = 'in_progress';
+      // Starting again ends a block.
+      delete currentStep.blockedReason;
+      delete currentStep.blockedAt;
       lifecycle.currentStepId = step.id;
     } else if (action === 'complete' && !gateFailed) {
       currentStep.status = 'completed';
       currentStep.completedAt = new Date().toISOString();
+      // Finished again: the rework is over. The count stays as history.
+      delete currentStep.reopenedAt;
+      delete currentStep.reopenReason;
+      delete currentStep.reopenedBy;
       for (const nextStep of lifecycle.steps) {
-        if (nextStep.status === 'blocked' && dependenciesAreComplete(lifecycle.steps, nextStep)) {
+        // A block with a reason was set deliberately; only starting the milestone again ends it.
+        if (nextStep.status === 'blocked' && !nextStep.blockedReason && dependenciesAreComplete(lifecycle.steps, nextStep)) {
           nextStep.status = 'pending';
         }
       }
@@ -268,6 +284,114 @@ export async function advanceLifecycleStep(
   }
 
   return updated;
+}
+
+/** A reopen request that cannot be carried out, with a code the server maps to an HTTP status. */
+export class LifecycleStepError extends Error {
+  constructor(message: string, readonly code: 'not_found' | 'not_reopenable' | 'not_blockable' | 'conflict') {
+    super(message);
+    this.name = 'LifecycleStepError';
+  }
+}
+
+/** Longest reason kept with a reopened milestone. */
+export const REOPEN_REASON_MAX_LENGTH = 500;
+
+/**
+ * A reason typed by a person or an agent, made safe to store and to print in the plan: control characters
+ * (which could reshape a terminal or a toast) are removed and whitespace is collapsed (so a reason cannot
+ * break the milestone plan's list formatting) before the length check.
+ */
+function reasonText(emptyMessage: string) {
+  return z.string()
+    // eslint-disable-next-line no-control-regex
+    .transform((value) => value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim())
+    .pipe(z.string().min(1, emptyMessage).max(REOPEN_REASON_MAX_LENGTH, `Keep the reason to ${REOPEN_REASON_MAX_LENGTH} characters or fewer.`));
+}
+
+const reopenSchema = z.object({
+  reason: reasonText('Say why the milestone is being reopened.'),
+  by: z.enum(['user', 'agent']),
+});
+const blockSchema = z.object({ reason: reasonText('Say what the milestone is blocked on.') });
+
+/**
+ * Sends a finished milestone back for rework and records why. Work loops back,
+ * so this is a first-class, checkable fact on the step (when, why, by whom, how
+ * many times) and not a silent status flip. Only a completed or verified
+ * milestone can be reopened. The earlier completion and its verification proof
+ * no longer describe the work, so both are cleared.
+ */
+export async function reopenLifecycleStep(
+  workspacePath: string,
+  stepId: string,
+  input: { reason: string; by: 'user' | 'agent' },
+): Promise<WorkspaceLifecycle> {
+  const { reason, by } = reopenSchema.parse(input);
+  const lifecycle = await loadWorkspaceLifecycle(workspacePath);
+  const step = lifecycle.steps.find((candidate) => candidate.id === stepId);
+  if (!step) throw new LifecycleStepError(`Step "${stepId}" not found in workspace lifecycle.`, 'not_found');
+  const reopenable = (status: LifecycleStep['status']) => status === 'completed' || status === 'verified';
+  if (!reopenable(step.status)) {
+    throw new LifecycleStepError(`Step "${stepId}" is ${step.status.replace('_', ' ')}, so there is nothing to reopen. Only a finished milestone can be reopened.`, 'not_reopenable');
+  }
+  const originalStep = JSON.stringify(step);
+
+  return mutateWorkspaceState(workspacePath, (state) => {
+    const current = state.lifecycle;
+    const currentStep = current?.steps.find((candidate) => candidate.id === stepId);
+    // Another session may have changed or reopened it while this call was waiting.
+    if (!current || !currentStep || JSON.stringify(currentStep) !== originalStep || !reopenable(currentStep.status)) {
+      throw new LifecycleStepError(`Step "${stepId}" changed during this operation. Reload the flow and retry.`, 'conflict');
+    }
+    currentStep.status = 'in_progress';
+    delete currentStep.completedAt;
+    delete currentStep.lastVerificationSha;
+    delete currentStep.lastVerificationStatus;
+    currentStep.reopenedAt = new Date().toISOString();
+    currentStep.reopenReason = reason;
+    currentStep.reopenedBy = by;
+    currentStep.reopenCount = (currentStep.reopenCount ?? 0) + 1;
+    current.currentStepId = currentStep.id;
+    current.revision = (current.revision ?? 0) + 1;
+    current.updatedAt = new Date().toISOString();
+    return current;
+  });
+}
+
+/**
+ * Marks a milestone as blocked on something outside the work itself, with the reason. Anyone may say so,
+ * including the AI: it only changes what is shown, never what is finished. Finished work cannot be blocked.
+ * Starting the milestone again ends the block.
+ */
+export async function blockLifecycleStep(
+  workspacePath: string,
+  stepId: string,
+  input: { reason: string },
+): Promise<WorkspaceLifecycle> {
+  const { reason } = blockSchema.parse(input);
+  const lifecycle = await loadWorkspaceLifecycle(workspacePath, { includeFleet: false });
+  const step = lifecycle.steps.find((candidate) => candidate.id === stepId);
+  if (!step) throw new LifecycleStepError(`Step "${stepId}" not found in workspace lifecycle.`, 'not_found');
+  if (step.status === 'completed') {
+    throw new LifecycleStepError(`Step "${stepId}" is already completed, so it cannot be blocked.`, 'not_blockable');
+  }
+  const originalStep = JSON.stringify(step);
+
+  return mutateWorkspaceState(workspacePath, (state) => {
+    const current = state.lifecycle;
+    const currentStep = current?.steps.find((candidate) => candidate.id === stepId);
+    if (!current || !currentStep || JSON.stringify(currentStep) !== originalStep) {
+      throw new LifecycleStepError(`Step "${stepId}" changed during this operation. Reload the flow and retry.`, 'conflict');
+    }
+    currentStep.status = 'blocked';
+    currentStep.blockedReason = reason;
+    // Saying it again with a new reason keeps when it first became blocked.
+    currentStep.blockedAt ??= new Date().toISOString();
+    current.revision = (current.revision ?? 0) + 1;
+    current.updatedAt = new Date().toISOString();
+    return current;
+  });
 }
 
 /**
@@ -358,7 +482,10 @@ export function renderLifecyclePlan(lifecycle: WorkspaceLifecycle, live = true):
   const lines = ['<!-- CONTEXTSPACE:MILESTONES:START -->', '## Milestone plan', '',
     live ? 'Current progress from the workspace lifecycle.' : 'Milestone definitions from the workspace lifecycle. Run `ctxspace flow` for current progress.', ''];
   for (const [index, step] of lifecycle.steps.entries()) {
-    lines.push(`${index + 1}. **${step.title}**${live ? ` — ${step.status.replaceAll('_', ' ')}` : ''}`);
+    const reopened = live && Boolean(step.reopenedAt) && step.status !== 'completed';
+    lines.push(`${index + 1}. **${step.title}**${live ? ` — ${reopened && step.status !== 'blocked' ? 'reopened, in progress' : step.status.replaceAll('_', ' ')}` : ''}`);
+    if (live && step.status === 'blocked' && step.blockedReason) lines.push(`   Blocked: ${step.blockedReason}`);
+    if (reopened) lines.push(`   Reopened${step.reopenedBy ? ` by ${step.reopenedBy === 'user' ? 'the user' : 'an agent'}` : ''}: ${step.reopenReason ?? 'no reason recorded'}`);
     if (step.description) lines.push(`   ${step.description}`);
     if (step.dependsOn?.length) lines.push(`   Depends on: ${step.dependsOn.map((id) => lifecycle.steps.find((item) => item.id === id)?.title ?? id).join(', ')}`);
     if (step.repo) lines.push(`   Repository: ${step.repo}`);

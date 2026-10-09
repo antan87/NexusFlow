@@ -1,0 +1,12 @@
+{
+  "description": "Rules that passed and must keep passing. `node perf/rules.mjs --enforce` fails when any of these does not pass. Add a rule here in the same change that makes it pass.",
+  "enforced": [
+    "R1",
+    "R2a",
+    "R2b",
+    "R3a",
+    "R3b",
+    "R4",
+    "R5"
+  ]
+}

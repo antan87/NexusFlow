@@ -19,6 +19,11 @@ export interface DiffHunkAction {
   patchHeader: string;
   enclosingDeclaration?: string;
   lines: string[];
+  firstChangedLineModified?: number;
+  firstChangedLineOriginal?: number;
+  firstChangedSnippetLine?: number;
+  /** Where the hunk's shown lines start in the snippet buffer: the modified side of every hunk, one after another. */
+  snippetStartLine?: number;
 }
 
 export interface DiffReviewComment {

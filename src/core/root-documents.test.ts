@@ -61,3 +61,38 @@ it('bounds previews and rejects invalid text, then recovers after the file is fi
   await fs.writeFile(target, 'fixed');
   expect((await readRootDocument(root, 'large.md')).content).toBe('fixed');
 });
+
+it('discovers visible folders, lists documents within subfolders, and supports recursive scanning', async () => {
+  await fs.mkdir(path.join(root, 'docs'));
+  await fs.writeFile(path.join(root, 'docs', 'guide.md'), '# Guide');
+  await fs.mkdir(path.join(root, 'docs', 'specs'));
+  await fs.writeFile(path.join(root, 'docs', 'specs', 'api.html'), '<h1>API</h1>');
+  await fs.mkdir(path.join(root, 'node_modules'));
+  await fs.writeFile(path.join(root, 'node_modules', 'ignored.md'), 'ignore');
+
+  const rootList = await listRootDocuments(root);
+  expect(rootList.folders).toContain('docs');
+  expect(rootList.folders).not.toContain('node_modules');
+
+  const docsList = await listRootDocuments(root, 'docs');
+  expect(docsList.documents.map((d) => d.name)).toEqual(['docs/guide.md']);
+  expect(docsList.folders).toEqual(['docs/specs']);
+
+  const docsTrailingSlash = await listRootDocuments(root, 'docs/');
+  expect(docsTrailingSlash.documents.map((d) => d.name)).toEqual(['docs/guide.md']);
+
+  const specsBackslash = await listRootDocuments(root, 'docs\\specs');
+  expect(specsBackslash.documents.map((d) => d.name)).toEqual(['docs/specs/api.html']);
+
+  const readBackslash = await readRootDocument(root, 'docs\\guide.md');
+  expect(readBackslash.content).toBe('# Guide');
+
+  const recursiveList = await listRootDocuments(root, '', true);
+  expect(recursiveList.documents.map((d) => d.name)).toContain('docs/guide.md');
+  expect(recursiveList.documents.map((d) => d.name)).toContain('docs/specs/api.html');
+  expect(recursiveList.documents.map((d) => d.name)).not.toContain('node_modules/ignored.md');
+
+  await expect(listRootDocuments(root, '../outside')).rejects.toThrow('Choose a folder inside this workspace.');
+  await expect(listRootDocuments(root, '.git')).rejects.toThrow('Choose a folder inside this workspace.');
+  await expect(listRootDocuments(root, 'nonexistent')).rejects.toThrow('Folder not found.');
+});

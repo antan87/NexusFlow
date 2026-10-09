@@ -71,7 +71,8 @@ export async function loadWorkGuidance(workspacePath: string): Promise<WorkGuida
     return {
       version: 1, revision: 0, workType: feature.workType ?? (flowType === 'quick' ? 'bug' : 'feature'),
       size: flowType === 'quick' ? 'small' : flowType === 'epic' ? 'epic' : 'standard',
-      assignment: { stage: 'investigate', objective: feature.description, expectedOutput: '', stopCondition: '' }, documents: [],
+      // A workspace created without a description still gets a string: readers trim the objective.
+      assignment: { stage: 'investigate', objective: feature.description ?? '', expectedOutput: '', stopCondition: '' }, documents: [],
     };
   }
 }

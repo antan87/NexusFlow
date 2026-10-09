@@ -18,6 +18,8 @@ import { analyzeAllReposCached } from '../analyzers/index.js';
 import { findExecutable } from '../agent/cliAvailability.js';
 import { checkGenerationLock } from './generation-lock.js';
 import { readWorkspaceKnowledge } from './knowledge.js';
+import { inspectAgentMcp } from './agent-mcp.js';
+import { CLI_NAME } from './constants.js';
 
 import type { ProjectAnalysis } from '../types.js';
 
@@ -367,6 +369,33 @@ export async function runDoctor(workspacePath: string): Promise<DoctorReport> {
         checks.push({ category: 'AI Assistants', name: a, status: 'pass', message: `binary "${bin}" is available` });
       }
     }
+  }
+
+  // ── 7b. MCP server availability for the user's AI agents ────────────────
+  // Informational on purpose: the server is optional, so a missing registration
+  // must not make an otherwise healthy workspace report warnings.
+  try {
+    for (const agent of await inspectAgentMcp()) {
+      const category = 'AI Agent MCP';
+      switch (agent.status.state) {
+        case 'registered':
+          checks.push({ category, name: agent.name, status: 'pass', message: `MCP server available as "${agent.status.serverName}"` });
+          break;
+        case 'missing':
+          checks.push({ category, name: agent.name, status: 'info', message: `has no user-level MCP registration, so it only gets the server where a workspace config provides one (for example, it cannot call request_user_input elsewhere). Run \`${CLI_NAME} mcp setup\`` });
+          break;
+        case 'unsupported':
+          checks.push({ category, name: agent.name, status: 'info', message: agent.status.reason });
+          break;
+        case 'unreadable':
+          checks.push({ category, name: agent.name, status: 'info', message: `could not read its MCP config (${agent.status.reason})` });
+          break;
+        case 'not-installed':
+          break;
+      }
+    }
+  } catch {
+    // Diagnostics about the user's agents must never break the workspace report.
   }
 
   // ── 8. System & OS Environment ──────────────────────────────────────────

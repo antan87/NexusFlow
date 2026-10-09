@@ -60,6 +60,24 @@ For example, a performance rewrite can begin with an investigation assignment:
 changing code.” Later, advance the assignment to design and then implementation.
 The same sources and milestone progress remain available throughout.
 
+### Unsaved edits are kept
+
+Edits to the assignment, the milestones and the delivery notes are kept on this
+device as you type, so switching sections, leaving the workspace or reloading the
+app does not lose them. The state next to **Save** reads Saved, Unsaved, Saving or
+Conflict. Saving or **Discard unsaved … changes** removes the kept draft; unread
+drafts expire after 30 days. A half-filled **Add document** form is kept only until
+the window closes, because pasted source text may be sensitive. If the browser
+blocks or fills its storage, the page says the draft was not kept.
+
+A kept draft remembers the saved version it started from. If someone saved a newer
+version meanwhile, edits to fields they did not change are combined with it and shown
+as unsaved. Edits to a field they also changed open a choice (**Keep my edits** or
+**Use the saved version**); nothing is applied, and the editing controls stay
+locked, until you pick. A milestone plan or the delivery notes saved differently
+are chosen as a whole. Workflow progress, which a plan save
+ignores, never counts as a conflict.
+
 ## Split larger work into deliverables
 
 Edit milestone titles, outcomes, branches, dependencies, and verification gates.
@@ -149,9 +167,11 @@ plan is copied into the new authored document before regenerating the plan. Revi
 that imported section once. Other custom sections should be moved into the authored
 document before refresh. Do not edit generated `contextspace-plan.md` directly.
 
-Notes saves use a revision check. A conflicting save keeps the editor draft;
-copy any changes you need before using **Reload delivery notes**, which replaces
-it with the latest saved text. MCP exposes the document through `get_planning_notes`.
+Notes saves use a revision check. A conflicting save keeps the editor draft.
+**Reload delivery notes** fetches the latest saved text and keeps your draft; if
+the saved notes changed meanwhile, both versions are shown side by side and you
+choose which to continue with. **Discard unsaved delivery notes** drops the draft.
+MCP exposes the document through `get_planning_notes`.
 
 For skill-based PBI generation, select the applicable skill and make the assignment
 explicit, for example: “Use the enabled PBI template; inventory existing work, draft

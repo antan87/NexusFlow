@@ -37,25 +37,25 @@ test('opens agent-created Markdown, HTML, PDF and Office documents from the root
   await page.route('**/api/workspace/demo/documents/file?*', (route) => route.fulfill({ contentType: 'application/pdf', headers: { 'Access-Control-Allow-Origin': '*' }, body: blankPdf() }));
   await page.goto('/#/workspaces/demo/documents');
   await expect(page.getByRole('heading', { name: 'Documents', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: /agent findings.md/ }).click();
+  await page.getByRole('treeitem', { name: /agent findings.md/ }).click();
   await expect(page.getByRole('heading', { name: 'Agent findings', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Raw text', exact: true }).click();
   await expect(page.getByText('# Agent findings', { exact: false })).toBeVisible();
-  await page.getByRole('button', { name: /page.html/ }).click();
+  await page.getByRole('treeitem', { name: /page.html/ }).click();
   const html = page.getByTitle('Preview of page.html');
   await expect(html).toBeVisible();
   await expect.poll(() => html.evaluate((frame: HTMLIFrameElement) => frame.srcdoc)).toContain('Rendered HTML');
   await expect(page.frameLocator('iframe[title="Preview of page.html"]').getByRole('heading', { name: 'Rendered HTML' })).toHaveCSS('color', 'rgb(18, 52, 86)');
   expect(await html.evaluate((frame: HTMLIFrameElement) => frame.srcdoc)).not.toContain('<script>');
-  await page.getByRole('button', { name: /evidence.pdf/ }).click();
+  await page.getByRole('treeitem', { name: /evidence.pdf/ }).click();
   await expect(page.getByTitle('Preview of evidence.pdf')).toBeVisible();
-  await page.getByRole('button', { name: /brief.docx/ }).click();
+  await page.getByRole('treeitem', { name: /brief.docx/ }).click();
   await expect(page.getByText('Preview is unavailable for this format.', { exact: false })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Download', exact: true })).toHaveAttribute('href', /name=brief.docx&download=1/);
   await page.getByLabel('Filter documents').fill('agent');
-  await expect(page.getByRole('button', { name: /evidence.pdf/ })).toHaveCount(0);
+  await expect(page.getByRole('treeitem', { name: /evidence.pdf/ })).toHaveCount(0);
   await page.getByLabel('Filter documents').fill('');
-  await page.getByRole('button', { name: /agent findings.md/ }).click();
+  await page.getByRole('treeitem', { name: /agent findings.md/ }).click();
   await page.screenshot({ path: 'test-results/root-documents.png', fullPage: true });
 });
 
@@ -66,7 +66,7 @@ test('maximizes a document inside the app borders and restores focus on Escape',
     json: { name: 'page.html', kind: 'html', content: '<h1>Rendered HTML</h1><style>h1{color:rgb(1,2,3)}</style>' },
   }));
   await page.goto('/#/workspaces/demo/documents');
-  await page.getByRole('button', { name: /page.html/ }).click();
+  await page.getByRole('treeitem', { name: /page.html/ }).click();
 
   const inlineFrame = page.getByTitle('Preview of page.html');
   await expect(inlineFrame).toBeVisible();
@@ -105,6 +105,86 @@ test('maximizes a document inside the app borders and restores focus on Escape',
   await expect(page.getByTitle('Preview of page.html')).toBeVisible();
 });
 
+test('fullscreen of a document covers the chat dock and viewport without chat overlapping', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('contextspace_chat_layout_v1', JSON.stringify({ hidden: false, percent: 50 }));
+    localStorage.setItem('contextspace_floating_chat_state_v1', JSON.stringify({
+      openTabs: ['demo'],
+      activeTab: 'demo',
+      splitTab: null,
+      splitRatio: 50,
+      modes: { demo: 'cli' },
+      harnesses: {},
+      terminalLaunches: {},
+      drafts: {},
+    }));
+  });
+
+  const documents = [{ name: 'page.html', kind: 'html', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' }];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => route.fulfill({
+    json: { name: 'page.html', kind: 'html', content: '<h1>Rendered HTML</h1><style>h1{color:rgb(1,2,3)}</style>' },
+  }));
+
+  await page.goto('/#/workspaces/demo/documents');
+  await page.getByRole('treeitem', { name: /page.html/ }).click();
+
+  const chatDock = page.getByRole('region', { name: 'CLI Chat' });
+  await expect(chatDock).toBeVisible();
+
+  const expand = page.getByRole('button', { name: 'Expand document' });
+  await expand.click();
+
+  const overlay = page.getByTestId('document-viewer-expanded');
+  await expect(overlay).toBeVisible();
+
+  const viewport = page.viewportSize()!;
+  const overlayBox = await overlay.boundingBox();
+  expect(overlayBox!.x).toBe(0);
+  expect(overlayBox!.y).toBe(0);
+  expect(overlayBox!.width).toBe(viewport.width);
+  expect(overlayBox!.height).toBe(viewport.height);
+
+  const isCoveringChat = await page.evaluate(() => {
+    const el = document.elementFromPoint(100, 200);
+    const overlayEl = document.querySelector('[data-testid="document-viewer-expanded"]');
+    return overlayEl !== null && (el === overlayEl || overlayEl.contains(el));
+  });
+  expect(isCoveringChat).toBe(true);
+
+  await page.keyboard.press('Escape');
+  await expect(overlay).toBeHidden();
+  await expect(chatDock).toBeVisible();
+});
+
+test('fullscreen and close controls for knowledge view in the documents tab', async ({ page }) => {
+  const documents = [{ name: 'contextspace-knowledge.md', kind: 'markdown', size: 2048, modifiedAt: '2026-10-04T10:00:00Z' }];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => route.fulfill({
+    json: {
+      name: 'contextspace-knowledge.md',
+      kind: 'markdown',
+      content: '# Knowledge\n\n## Decisions\n\n### 2026-10-01 — test\n**Decision:** use portal\n',
+    },
+  }));
+  await page.goto('/#/workspaces/demo/documents');
+  await page.getByRole('button', { name: /^Knowledge/ }).click();
+
+  const expandKnowledge = page.getByRole('button', { name: 'Expand knowledge' });
+  await expect(expandKnowledge).toBeVisible();
+  await expandKnowledge.click();
+
+  const overlay = page.getByTestId('knowledge-expanded');
+  await expect(overlay).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(overlay).toBeHidden();
+
+  await page.getByRole('button', { name: 'Close document' }).click();
+  await expect(page.getByText('Select a document to open it here.')).toBeVisible();
+});
+
 /**
  * Deliberately a full document with a real <head>, because that is what an AI writes. DOMPurify
  * returns only the <body>, so head assets are hoisted by the viewer rather than sanitized in place;
@@ -134,7 +214,7 @@ async function openStyledPage(page: import('@playwright/test').Page) {
     json: { name: 'report.html', kind: 'html', content: STYLED_PAGE },
   }));
   await page.goto('/#/workspaces/demo/documents');
-  await page.getByRole('button', { name: /report.html/ }).click();
+  await page.getByRole('treeitem', { name: /report.html/ }).click();
   await expect(page.getByTitle('Preview of report.html')).toBeVisible();
   const srcdoc = () => page.getByTitle('Preview of report.html').evaluate((frame: HTMLIFrameElement) => frame.srcdoc);
   return { frame: page.getByTitle('Preview of report.html'), srcdoc };
@@ -203,18 +283,47 @@ test('rejects a second document that tries to inherit trust', async ({ page }) =
     return route.fulfill({ json: { name, kind: 'html', content: STYLED_PAGE } });
   });
   await page.goto('/#/workspaces/demo/documents');
-  await page.getByRole('button', { name: /report.html/ }).click();
+  await page.getByRole('treeitem', { name: /report.html/ }).click();
   await expect(page.getByTitle('Preview of report.html')).toBeVisible();
   await page.getByRole('button', { name: 'Trust this document', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Stop trusting', exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: /other.html/ }).click();
+  await page.getByRole('treeitem', { name: /other.html/ }).click();
   await expect(page.getByTitle('Preview of other.html')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Trust this document', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Stop trusting', exact: true })).toHaveCount(0);
   expect(await page.getByTitle('Preview of other.html').evaluate((node: HTMLIFrameElement) => node.srcdoc)).not.toContain('script-src');
   // The stylesheet is still hoisted, because that is Q1 and not gated on trust.
   expect(await page.getByTitle('Preview of other.html').evaluate((node: HTMLIFrameElement) => node.srcdoc)).toContain('bootstrap.min.css');
+});
+
+test('offers opening an HTML document in the real browser, and only for HTML', async ({ page }) => {
+  const documents = [
+    { name: 'page.html', kind: 'html', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' },
+    { name: 'notes.md', kind: 'markdown', size: 120, modifiedAt: '2026-09-22T00:00:00.000Z' },
+  ];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => {
+    const name = new URL(route.request().url()).searchParams.get('name');
+    return route.fulfill({ json: { name, kind: name?.endsWith('.html') ? 'html' : 'markdown', content: 'body' } });
+  });
+  await page.goto('/#/workspaces/demo/documents');
+
+  await page.getByRole('treeitem', { name: /page.html/ }).click();
+  await expect(page.getByTitle('Preview of page.html')).toBeVisible();
+  const open = page.getByRole('link', { name: 'Open in browser', exact: true });
+  await expect(open).toBeVisible();
+  await expect(open).toHaveAttribute('href', /name=page.html&open=1/);
+  // Renders in a new tab, and never hands the opener a handle on it.
+  await expect(open).toHaveAttribute('target', '_blank');
+  await expect(open).toHaveAttribute('rel', /noopener/);
+  await expect(open).toHaveAttribute('rel', /noreferrer/);
+
+  // Markdown already renders in-app, so it does not get the escape hatch.
+  await page.getByRole('treeitem', { name: /notes.md/ }).click();
+  // Markdown renders through ChatMarkdown rather than a titled frame, so assert on its content.
+  await expect(page.getByText('body', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open in browser', exact: true })).toHaveCount(0);
 });
 
 test('recovers from list and preview failures and discovers newly created files on refresh', async ({ page }) => {
@@ -234,7 +343,7 @@ test('recovers from list and preview failures and discovers newly created files 
   await expect(page.getByText('No documents in the workspace root yet.', { exact: false })).toBeVisible();
   documents.push({ name: 'report.txt', kind: 'text', size: 20, modifiedAt: '2026-09-22T00:00:00.000Z' });
   await page.getByRole('button', { name: 'Refresh documents' }).click();
-  await page.getByRole('button', { name: /report.txt/ }).click();
+  await page.getByRole('treeitem', { name: /report.txt/ }).click();
   await expect(page.getByRole('alert')).toContainText('Document was removed');
   previewFails = false;
   await page.getByRole('button', { name: 'Retry preview' }).click();
@@ -275,7 +384,7 @@ test('links inside a document never leave the app', async ({ page }) => {
 
   await page.goto('/#/workspaces/demo/documents');
   const appUrl = () => new URL(page.url());
-  await page.getByRole('button', { name: /index.md/ }).click();
+  await page.getByRole('treeitem', { name: /index.md/ }).click();
   const preview = page.getByRole('article', { name: 'Document preview' });
   await expect(preview.getByRole('heading', { name: 'Screenshot index' })).toBeVisible();
   await expect(preview.getByRole('img', { name: 'inline capture' })).toHaveAttribute('src', /name=assessment%2Fscreenshots%2F01-onboarding.png/);
@@ -309,4 +418,150 @@ test('links inside a document never leave the app', async ({ page }) => {
   await expect(external).toHaveAttribute('rel', /noopener/);
   expect(appUrl().pathname).toBe('/');
   expect(await page.evaluate(() => (window as unknown as { unsafe?: boolean }).unsafe)).toBeUndefined();
+});
+
+test('opens folders in the tree, previews nested documents, and searches every folder', async ({ page }) => {
+  const rootDocs = [
+    { name: 'root-readme.md', kind: 'markdown', size: 100, modifiedAt: '2026-09-22T00:00:00.000Z' },
+  ];
+  const docsFolderFiles = [
+    { name: 'docs/architecture.md', kind: 'markdown', size: 250, modifiedAt: '2026-09-22T00:00:00.000Z' },
+  ];
+
+  await page.route('**/api/workspace/demo/documents*', (route) => {
+    const url = new URL(route.request().url());
+    const folder = url.searchParams.get('folder');
+    const recursive = url.searchParams.get('recursive');
+    if (recursive === '1') {
+      return route.fulfill({
+        json: {
+          documents: [...rootDocs, ...docsFolderFiles],
+          folders: ['docs'],
+        },
+      });
+    }
+    if (folder === 'docs') {
+      return route.fulfill({
+        json: {
+          documents: docsFolderFiles,
+          folders: [],
+        },
+      });
+    }
+    return route.fulfill({
+      json: {
+        documents: rootDocs,
+        folders: ['docs'],
+      },
+    });
+  });
+
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => {
+    const name = new URL(route.request().url()).searchParams.get('name');
+    if (name === 'docs/architecture.md') {
+      return route.fulfill({
+        json: { name: 'docs/architecture.md', kind: 'markdown', content: '# Architecture Overview\n\nModular design.' },
+      });
+    }
+    return route.fulfill({
+      json: { name: 'root-readme.md', kind: 'markdown', content: '# Root Readme' },
+    });
+  });
+
+  await page.goto('/#/workspaces/demo/documents');
+  const list = page.getByRole('complementary', { name: 'Documents to open' });
+  const folder = list.getByRole('treeitem', { name: 'docs', exact: true });
+  await expect(folder).toHaveAttribute('aria-expanded', 'false');
+  await expect(list.getByRole('treeitem', { name: /root-readme\.md/ })).toBeVisible();
+
+  // A folder lists its documents in place when it is opened; the rest of the tree stays where it was.
+  await folder.click();
+  await expect(folder).toHaveAttribute('aria-expanded', 'true');
+  await list.getByRole('treeitem', { name: /architecture\.md/ }).click();
+
+  const article = page.getByRole('article', { name: 'Document preview' });
+  await expect(article.getByRole('heading', { name: 'Architecture Overview' })).toBeVisible();
+  // The reader names the folder in its header, and the list is still there to pick the next one.
+  await expect(article.getByRole('heading', { name: 'docs/architecture.md', exact: true })).toBeVisible();
+  await expect(list.getByRole('treeitem', { name: /root-readme\.md/ })).toBeVisible();
+  await list.getByRole('treeitem', { name: /root-readme\.md/ }).click();
+  await expect(article.getByRole('heading', { name: 'Root Readme' })).toBeVisible();
+
+  // Filtering searches every folder, not only the open ones.
+  await folder.click();
+  await list.getByLabel('Filter documents').fill('architecture');
+  await expect(list.getByRole('treeitem', { name: /architecture\.md/ })).toBeVisible();
+  await expect(list.getByRole('treeitem', { name: /root-readme\.md/ })).toHaveCount(0);
+
+  // Closing the document leaves the list.
+  await article.getByRole('button', { name: 'Close document' }).click();
+  await expect(page.getByText('Select a document to open it here.')).toBeVisible();
+});
+
+test('beside the chat, a document takes the panel and the list opens over it', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    localStorage.setItem('contextspace_chat_layout_v1', JSON.stringify({ hidden: false, percent: 50 }));
+  });
+
+  const documents = [
+    { name: 'findings.md', kind: 'markdown', size: 100, modifiedAt: '2026-09-22T00:00:00.000Z' },
+    { name: 'summary.md', kind: 'markdown', size: 200, modifiedAt: '2026-09-22T00:00:00.000Z' },
+    { name: 'report.html', kind: 'html', size: 300, modifiedAt: '2026-09-22T00:00:00.000Z' },
+  ];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents, folders: [] } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => {
+    const name = new URL(route.request().url()).searchParams.get('name');
+    if (name === 'findings.md') return route.fulfill({ json: { name: 'findings.md', kind: 'markdown', content: '# Findings content' } });
+    if (name === 'summary.md') return route.fulfill({ json: { name: 'summary.md', kind: 'markdown', content: '# Summary content' } });
+    return route.fulfill({ json: { name: 'report.html', kind: 'html', content: '<h1>Report</h1>' } });
+  });
+
+  await page.goto('/#/workspaces/demo/documents');
+  const list = page.getByRole('complementary', { name: 'Documents to open' });
+  await expect(list).toBeVisible();
+
+  // Opening a document gives it the panel; the list is not stacked above it.
+  await list.getByRole('treeitem', { name: /findings.md/ }).click();
+  const article = page.getByRole('article', { name: 'Document preview' });
+  await expect(article.getByRole('heading', { name: 'Findings content' })).toBeVisible();
+  await expect(list).toBeHidden();
+
+  // The reader's one row: previous and next, in the order the list shows, and the document's own actions.
+  await article.getByRole('button', { name: 'Next document' }).click();
+  await expect(page.getByTitle('Preview of report.html')).toBeVisible();
+  await article.getByRole('button', { name: 'Next document' }).click();
+  await expect(article.getByRole('heading', { name: 'Summary content' })).toBeVisible();
+  await expect(article.getByRole('button', { name: 'Next document' })).toBeDisabled();
+
+  // The list opens over the document, side by side with nothing, and closes once a document is chosen.
+  const toolbar = page.getByRole('toolbar', { name: 'Documents' });
+  await toolbar.getByRole('button', { name: 'Show the document list' }).click();
+  await expect(list).toBeVisible();
+  await list.getByRole('treeitem', { name: /findings.md/ }).click();
+  await expect(list).toBeHidden();
+  await expect(article.getByRole('heading', { name: 'Findings content' })).toBeVisible();
+});
+
+test('on a wide panel the list stays beside the document, and can be hidden', async ({ page }) => {
+  const documents = [
+    { name: 'findings.md', kind: 'markdown', size: 100, modifiedAt: '2026-09-22T00:00:00.000Z' },
+  ];
+  await page.route('**/api/workspace/demo/documents', (route) => route.fulfill({ json: { documents, folders: [] } }));
+  await page.route('**/api/workspace/demo/documents/preview?*', (route) => route.fulfill({ json: { name: 'findings.md', kind: 'markdown', content: '# Desktop Findings' } }));
+
+  await page.goto('/#/workspaces/demo/documents');
+  await page.getByRole('treeitem', { name: /findings.md/ }).click();
+
+  const list = page.getByRole('complementary', { name: 'Documents to open' });
+  const article = page.getByRole('article', { name: 'Document preview' });
+  await expect(list).toBeVisible();
+  await expect(article.getByRole('heading', { name: 'Desktop Findings' })).toBeVisible();
+  expect((await article.boundingBox())!.x).toBeGreaterThan((await list.boundingBox())!.x);
+
+  const toolbar = page.getByRole('toolbar', { name: 'Documents' });
+  await toolbar.getByRole('button', { name: 'Hide the document list' }).click();
+  await expect(list).toBeHidden();
+  await toolbar.getByRole('button', { name: 'Show the document list' }).click();
+  await expect(list).toBeVisible();
 });

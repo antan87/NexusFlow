@@ -24,6 +24,7 @@ import * as sessionFinder from './utils/session-finder.js';
 import { ProviderRegistry } from './agent/ProviderRegistry.js';
 import type { AgentHarness, ProviderAdapter } from './agent/ProviderRegistry.js';
 import { workroomManager } from './workrooms/manager.js';
+import { clearEditorDetectionCache } from './utils/detect-editors.js';
 
 // Mock dependencies
 vi.mock('node:fs/promises');
@@ -86,6 +87,7 @@ vi.mock('./orchestration/index.js');
 describe('Server API Endpoints Unit Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearEditorDetectionCache();
   });
 
   it('keeps diagnostic capture and export behind the local host/origin guards', async () => {
@@ -389,6 +391,11 @@ describe('Server API Endpoints Unit Tests', () => {
         isDirectory: () => true
       } as any);
       vi.spyOn(fs, 'realpath').mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      // A launch target must exist as a regular file, so describe one.
+      vi.spyOn(fs, 'lstat').mockResolvedValue({
+        isSymbolicLink: () => false,
+        isFile: () => true,
+      } as any);
       vi.spyOn(workspace, 'loadWorkspaceManifest').mockResolvedValue({
         id: 'test-workspace',
         workspacePath,
@@ -429,6 +436,13 @@ describe('Server API Endpoints Unit Tests', () => {
       vi.spyOn(fs, 'stat').mockResolvedValue({
         isDirectory: () => true
       } as any);
+      // A launch target under devDir must resolve inside it and be a git repository.
+      vi.spyOn(fs, 'realpath').mockImplementation(async (candidate) => path.resolve(String(candidate)));
+      // Only `.git` exists: a blanket "exists" would also make the editor look for a .code-workspace file.
+      vi.spyOn(fs, 'access').mockImplementation(async (candidate) => {
+        if (path.basename(String(candidate)) === '.git') return undefined;
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      });
 
       vi.mocked(execa).mockImplementation((async (command: any, args?: readonly string[]): Promise<any> => ({
         exitCode: args?.[0] === '--version' && command === 'code' ? 0 : 1,
@@ -2278,9 +2292,9 @@ describe('Server API Endpoints Unit Tests', () => {
 
     it('POST /services/start re-detects server-side and ignores the request body', async () => {
       vi.mocked(orchestration.detectAllServices).mockResolvedValue([
-        { name: 'api', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json' },
+        { name: 'api', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json', declared: true },
       ] as any);
-      vi.mocked(orchestration.startServices).mockResolvedValue(undefined);
+      vi.mocked(orchestration.startServices).mockResolvedValue([{ name: 'api', status: 'running', pid: 7 }]);
 
       const response = await app.request('/api/workspace/ws/services/start', {
         method: 'POST',
@@ -2292,7 +2306,32 @@ describe('Server API Endpoints Unit Tests', () => {
       expect(orchestration.detectAllServices).toHaveBeenCalled();
       // The started services are the DETECTED ones, not the client's payload.
       const started = vi.mocked(orchestration.startServices).mock.calls[0]?.[0];
-      expect(started).toEqual([{ name: 'api', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json' }]);
+      expect(started).toEqual([{ name: 'api', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json', declared: true }]);
+    });
+
+    it('POST /services/start starts only declared services and reports each result', async () => {
+      vi.mocked(orchestration.detectAllServices).mockResolvedValue([
+        { name: 'app/web', command: '/bin/sh', args: ['-c', 'npm run dev'], cwd: '/mock', source: 'procfile', declared: true },
+        { name: 'tools', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json', declared: false },
+      ] as any);
+      vi.mocked(orchestration.startServices).mockResolvedValue([{ name: 'app/web', status: 'failed', reason: 'Port 3000 is already in use by another process.' }]);
+
+      const response = await app.request('/api/workspace/ws/services/start', { method: 'POST' });
+      expect(response.status).toBe(200);
+      expect(vi.mocked(orchestration.startServices).mock.calls.at(-1)?.[0].map((s: any) => s.name)).toEqual(['app/web']);
+      await expect(response.json()).resolves.toMatchObject({ success: false, results: [{ name: 'app/web', status: 'failed', reason: expect.stringContaining('Port 3000') }] });
+    });
+
+    it('POST /services/start refuses when nothing is declared instead of starting guesses', async () => {
+      vi.mocked(orchestration.startServices).mockClear();
+      vi.mocked(orchestration.detectAllServices).mockResolvedValue([
+        { name: 'tools', command: 'npm', args: ['run', 'dev'], cwd: '/mock', source: 'package.json', declared: false },
+      ] as any);
+
+      const response = await app.request('/api/workspace/ws/services/start', { method: 'POST' });
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({ error: expect.stringContaining('Procfile.dev') });
+      expect(orchestration.startServices).not.toHaveBeenCalled();
     });
 
     it('POST /services/:name/start 404s for an unknown service', async () => {
@@ -2311,6 +2350,19 @@ describe('Server API Endpoints Unit Tests', () => {
         body: JSON.stringify({ id: 'docker-compose:nope.yml' }),
       });
       expect(response.status).toBe(404);
+    });
+
+    it('POST /orchestrators/stop still stops a recorded tool that is no longer detected', async () => {
+      vi.mocked(orchestration.detectOrchestrationTools).mockResolvedValue([]);
+      vi.mocked(orchestration.stopRecordedOrchestrator).mockResolvedValue(true);
+
+      const response = await app.request('/api/workspace/ws/orchestrators/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 'procfile:Procfile' }),
+      });
+      expect(response.status).toBe(200);
+      expect(orchestration.stopRecordedOrchestrator).toHaveBeenCalledWith('procfile:Procfile', expect.any(String));
     });
 
     it('GET /services/logs/:name rejects a traversal service name without reading outside the log dir', async () => {
@@ -2922,6 +2974,32 @@ describe('Server API Endpoints Unit Tests', () => {
         expect((await app.request('/api/workspaces/status?offset=-1&limit=24')).status).toBe(400);
         expect((await app.request('/api/workspaces/status?offset=24&limit=24')).status).toBe(400);
         expect((await app.request('/api/workspaces/status?offset=24&limit=24&snapshot=missing')).status).toBe(410);
+      } finally {
+        findActive.mockRestore();
+      }
+    });
+
+    it('runs git status once per repository per scan when workspaces share it', async () => {
+      vi.mocked(config.loadConfig).mockResolvedValue({ workspacesDir: '/workspaces' } as any);
+      vi.mocked(workspace.listWorkspaces).mockResolvedValue(['a', 'b', 'c'].map((name, index) => ({
+        id: `ws-${name}`,
+        branchName: `shared-${name}`,
+        mode: 'in-place',
+        workspacePath: `/workspaces/shared-${name}`,
+        repos: ['/repos/shared'],
+        createdAt: new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
+      })) as any);
+      vi.mocked(execa).mockResolvedValue({ stdout: ' M src/a.ts\0', stderr: '', exitCode: 0 } as any);
+      const findActive = vi.spyOn(sessionFinder, 'findActiveAssistants').mockResolvedValue([]);
+      const statusRuns = () => vi.mocked(execa).mock.calls.filter(([, args]) => (args as string[] | undefined)?.includes('status')).length;
+      try {
+        const page = await (await app.request('/api/workspaces/status?offset=0&limit=24')).json();
+        expect(Object.values(page.statuses).map((status: any) => status.changedFiles)).toEqual([1, 1, 1]);
+        expect(statusRuns()).toBe(1);
+
+        // A new scan reads fresh status.
+        await app.request('/api/workspaces/status?offset=0&limit=24');
+        expect(statusRuns()).toBe(2);
       } finally {
         findActive.mockRestore();
       }

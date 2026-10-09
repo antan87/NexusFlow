@@ -4,81 +4,84 @@
  */
 import React, { useEffect, useRef, useMemo } from 'react';
 import type { DiffAdapterRenderProps } from '../types.js';
+import { classifyPatch } from '../utils/diffParser.js';
 
 export interface FallbackDiffAdapterProps extends DiffAdapterRenderProps {
   targetLine?: number;
+  targetOrigLine?: number;
   jumpNonce?: number;
 }
 
 export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
   patchText,
   targetLine,
+  targetOrigLine,
   jumpNonce,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const lastJumpNonceRef = useRef<number | undefined>(undefined);
+  const lastJumpKeyRef = useRef<string>('');
 
   useEffect(() => {
-    if (!containerRef.current || !targetLine || targetLine <= 0) return;
-    if (lastJumpNonceRef.current === jumpNonce) return;
-    lastJumpNonceRef.current = jumpNonce;
+    if (!containerRef.current) return;
+    const hasModTarget = targetLine !== undefined && targetLine > 0;
+    const hasOrigTarget = targetOrigLine !== undefined && targetOrigLine > 0;
+    if (!hasModTarget && !hasOrigTarget) return;
 
-    const el = containerRef.current.querySelector<HTMLElement>(`[data-mod-line="${targetLine}"]`) ||
+    const jumpKey = `${targetLine ?? ''}:${targetOrigLine ?? ''}:${jumpNonce ?? 0}`;
+    if (lastJumpKeyRef.current === jumpKey) return;
+    lastJumpKeyRef.current = jumpKey;
+
+    const el =
+      (hasOrigTarget
+        ? containerRef.current.querySelector<HTMLElement>(`[data-orig-line="${targetOrigLine}"][data-diff-marker="-"]`) ||
+          containerRef.current.querySelector<HTMLElement>(`[data-orig-line="${targetOrigLine}"]`)
+        : null) ||
+      (hasModTarget
+        ? containerRef.current.querySelector<HTMLElement>(`[data-mod-line="${targetLine}"]`)
+        : null) ||
       containerRef.current.querySelector<HTMLElement>('[data-is-target="true"]');
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [targetLine, jumpNonce]);
+  }, [targetLine, targetOrigLine, jumpNonce]);
 
   const renderedLines = useMemo(() => {
     if (!patchText || !patchText.trim()) return [];
-    const lines = patchText.split(/\r?\n/);
-    // Both sides are tracked. Only the modified side used to advance, so a
-    // deleted line had no number at all and fell back to its index in this
-    // array, which read as a plausible but wrong file line next to the correct
-    // ones in the same column.
-    let currentOrigLine = 0;
-    let currentModLine = 0;
-
-    return lines.map((line, idx) => {
+    // Line kinds and numbers come from the shared classifier: inside a hunk `--- x` is a removed
+    // `-- x` line, not a file header, and every number is a real file line, never an array index.
+    return classifyPatch(patchText).map(({ text: line, kind, origLine, modLine }, idx) => {
       let bgClass = '';
       let textClass = 'text-muted-foreground';
-      let lineOrigNum: number | undefined;
-      let lineModNum: number | undefined;
+      const lineOrigNum = kind === 'header' || kind === 'meta' ? undefined : origLine;
+      const lineModNum = kind === 'header' || kind === 'meta' ? undefined : modLine;
+      let marker = ' ';
+      let content = line;
 
-      if (line.startsWith('@@')) {
+      if (kind === 'hunk') {
         bgClass = 'bg-sky-500/15';
         textClass = 'text-info-foreground font-bold italic';
-        const orig = line.match(/-(\d+)/);
-        if (orig?.[1]) {
-          currentOrigLine = parseInt(orig[1], 10) - 1;
-          lineOrigNum = currentOrigLine + 1;
-        }
-        const mod = line.match(/\+(\d+)/);
-        if (mod?.[1]) {
-          currentModLine = parseInt(mod[1], 10) - 1;
-          lineModNum = currentModLine + 1;
-        }
-      } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      } else if (kind === 'added') {
         bgClass = 'bg-emerald-500/15';
         textClass = 'text-success-foreground font-semibold';
-        currentModLine++;
-        lineModNum = currentModLine;
-      } else if (line.startsWith('-') && !line.startsWith('---')) {
+        marker = '+';
+        content = line.slice(1);
+      } else if (kind === 'removed') {
         bgClass = 'bg-rose-500/15';
         textClass = 'text-destructive-foreground font-semibold';
-        currentOrigLine++;
-        lineOrigNum = currentOrigLine;
-      } else if (line.startsWith(' ')) {
-        currentOrigLine++;
-        currentModLine++;
-        lineOrigNum = currentOrigLine;
-        lineModNum = currentModLine;
+        marker = '-';
+        content = line.slice(1);
+      } else if (kind === 'context') {
+        content = line.slice(1);
       }
 
-      const isTarget = targetLine !== undefined && lineModNum === targetLine;
+      const isTarget =
+        (targetOrigLine !== undefined && lineOrigNum === targetOrigLine && lineModNum === undefined) ||
+        (targetOrigLine === undefined && targetLine !== undefined && lineModNum === targetLine) ||
+        (targetOrigLine === undefined && targetLine !== undefined && lineModNum === undefined && lineOrigNum === targetLine);
 
       return {
         idx,
         line,
+        content,
+        marker,
         lineOrigNum,
         lineModNum,
         isTarget,
@@ -86,7 +89,7 @@ export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
         textClass,
       };
     });
-  }, [patchText, targetLine]);
+  }, [patchText, targetLine, targetOrigLine]);
 
   if (!patchText || !patchText.trim()) {
     return (
@@ -110,15 +113,31 @@ export const FallbackDiffAdapter: React.FC<FallbackDiffAdapterProps> = ({
           data-orig-line={item.lineOrigNum}
           data-mod-line={item.lineModNum}
           data-is-target={item.isTarget ? 'true' : undefined}
-          className={`flex px-3 py-0.5 hover:bg-accent/40 ${item.isTarget ? 'bg-primary/25 border-l-2 border-primary font-bold' : item.bgClass}`}
+          className={`flex min-w-full w-fit py-0.5 border-l-2 transition-colors hover:bg-accent/40 ${
+            item.isTarget
+              ? 'bg-primary/25 border-primary font-bold'
+              : 'border-transparent ' + item.bgClass
+          }`}
         >
-          <span className="w-10 select-none text-right pr-3 text-[10px] text-muted-foreground">
+          <span className="w-12 shrink-0 select-none text-right pr-2 text-[10px] font-mono text-muted-foreground/70 border-r border-border/40">
             {item.lineOrigNum ?? ''}
           </span>
-          <span className="w-10 select-none text-right pr-3 text-[10px] text-muted-foreground">
+          <span className="w-12 shrink-0 select-none text-right pr-2 text-[10px] font-mono text-muted-foreground/70 border-r border-border/40">
             {item.lineModNum ?? ''}
           </span>
-          <span className={`whitespace-pre flex-1 ${item.textClass}`}>{item.line}</span>
+          <span
+            data-diff-marker={item.marker.trim() || undefined}
+            className={`w-5 shrink-0 select-none text-center font-bold font-mono text-xs border-r border-border/40 ${
+              item.marker === '+'
+                ? 'text-success-foreground'
+                : item.marker === '-'
+                  ? 'text-destructive-foreground'
+                  : 'text-muted-foreground/40'
+            }`}
+          >
+            {item.marker}
+          </span>
+          <span className={`pl-2 pr-3 whitespace-pre flex-1 ${item.textClass}`}>{item.content}</span>
         </div>
       ))}
     </div>
