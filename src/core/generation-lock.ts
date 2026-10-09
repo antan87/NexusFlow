@@ -128,6 +128,15 @@ async function readOutput(
   return fs.readFile(fullPath);
 }
 
+/**
+ * Why dirty-file freshness can be unknowable, and the one way out, shared by the banner and the
+ * drift message so the two cannot disagree. Windows has no way to refuse to follow a link when
+ * opening a file, so uncommitted files are not read (see getRepoFingerprint). Refreshing records
+ * that same unreadable state again, so it cannot clear the notice while the files stay uncommitted.
+ */
+const UNREADABLE_DIRTY_FILES = 'Windows cannot safely read uncommitted files';
+const UNVERIFIED_WAY_OUT = `commit or stash the changes and run \`${CLI_NAME} refresh\`; refreshing alone does not.`;
+
 export function renderFreshnessBanner(
   snapshot: GenerationSnapshot,
   drift: GenerationDrift[] = [],
@@ -141,8 +150,8 @@ export function renderFreshnessBanner(
   const lines = confirmedDrift.length === 0 && uncertainRepos.length > 0
     ? [
         `> **⚠ ${BRAND_NAME.toUpperCase()} CONTEXT FRESHNESS CANNOT BE VERIFIED.**`,
-        `> Dirty-file freshness for ${uncertainRepos.join(', ')} cannot be safely verified on this platform; this does not prove the context is stale.`,
-        `> Treat generated facts as provisional; commit the files or verify live state with \`${CLI_NAME} status\`.`,
+        `> Uncommitted changes in ${uncertainRepos.join(', ')} cannot be checked on this platform (${UNREADABLE_DIRTY_FILES}), so later edits to them would go unnoticed. Commits are still checked. This does not prove the context is stale.`,
+        `> Treat generated facts as provisional and check live state with \`${CLI_NAME} status\`. To clear this, ${UNVERIFIED_WAY_OUT}`,
       ]
     : drift.length === 0
     ? [
@@ -280,7 +289,7 @@ export async function checkGenerationLock(
         generated: recorded?.sha,
         current: sha,
         message: uncertain
-          ? `Generated from ${repo.name}@${recorded?.sha.slice(0, 12) ?? 'unknown'} while dirty-file freshness could not be safely verified on this platform.`
+          ? `Generated from ${repo.name}@${recorded?.sha.slice(0, 12) ?? 'unknown'}, but uncommitted changes cannot be checked on this platform (${UNREADABLE_DIRTY_FILES}), so later edits to them would go unnoticed. Commits are still checked. To clear this, ${UNVERIFIED_WAY_OUT}`
           : `Generated at ${repo.name}@${recorded?.sha.slice(0, 12) ?? 'unknown'}; repo now at ${sha.slice(0, 12)}${newlyDirty || current?.includes('+') ? ' with uncommitted changes' : ''}.`,
       };
     }

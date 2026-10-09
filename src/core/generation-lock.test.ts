@@ -116,6 +116,51 @@ describe('generation lock', () => {
     expect(banner).not.toContain('Run `ctxspace refresh` before');
   });
 
+  it('says what is degraded, what is still checked and how to clear an unverifiable snapshot', async () => {
+    await createLock();
+    const lockPath = path.join(workspacePath, PRIMARY_LOCK_FILE);
+    const lock = JSON.parse(await fs.readFile(lockPath, 'utf8'));
+    lock.repos.repo.fingerprint = 'uncacheable:platform';
+    await fs.writeFile(lockPath, JSON.stringify(lock));
+    const result = await checkGenerationLock(workspacePath, { markDocuments: true });
+
+    const banner = await fs.readFile(path.join(workspacePath, 'AGENTS.md'), 'utf8');
+    const message = result.drift.find((item) => item.kind === 'unverified')!.message;
+    for (const text of [banner, message]) {
+      expect(text).toContain('Windows cannot safely read uncommitted files');
+      expect(text).toContain('Commits are still checked');
+      expect(text).toContain('commit or stash the changes and run `ctxspace refresh`');
+      expect(text).toContain('refreshing alone does not');
+    }
+    expect(banner).toContain('Uncommitted changes in repo cannot be checked');
+    expect(banner).toContain('check live state with `ctxspace status`');
+  });
+
+  it('stays unverifiable across refreshes while files are uncommitted, and clears once they are committed and refreshed', async () => {
+    // A Windows-like machine: a dirty tree cannot be fingerprinted, a clean one can.
+    const realFingerprint = analysisCache.getRepoFingerprint;
+    vi.spyOn(analysisCache, 'getRepoFingerprint').mockImplementation(async (repo) => {
+      const { stdout } = await execa('git', ['status', '--porcelain'], { cwd: repo });
+      return stdout.trim() ? null : realFingerprint(repo);
+    });
+    const unverified = expect.objectContaining({ kind: 'unverified', name: 'repo' });
+    await fs.writeFile(path.join(repoPath, 'README.md'), '# uncommitted\n');
+
+    await createLock();
+    expect((await checkGenerationLock(workspacePath)).drift).toContainEqual(unverified);
+    // Refreshing again records the same unreadable state, so it cannot clear the notice.
+    await createLock();
+    expect((await checkGenerationLock(workspacePath)).drift).toContainEqual(unverified);
+
+    // Committing moves HEAD, which is still checked: the old snapshot is now plainly stale.
+    await execa('git', ['commit', '-am', 'save the work'], { cwd: repoPath });
+    expect((await checkGenerationLock(workspacePath)).drift).toContainEqual(expect.objectContaining({ kind: 'repo', name: 'repo' }));
+
+    // Refreshing on the clean tree clears it.
+    await createLock();
+    expect(await checkGenerationLock(workspacePath)).toMatchObject({ fresh: true, drift: [] });
+  });
+
   it('detects edits outside the mutable freshness banner', async () => {
     await createLock();
     await fs.appendFile(path.join(workspacePath, 'AGENTS.md'), 'manual edit\n');
