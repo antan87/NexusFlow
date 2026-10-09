@@ -51,16 +51,19 @@ import { useCreationStream, type CreationStep } from '../lib/api/useCreationStre
 import type { RepoInfo, RepoFreshness, WorkspaceMode, WorkGuidance } from '../types.js';
 import { WorkspaceLauncher } from '../features/workspace-launch/WorkspaceLauncher.js';
 import { floatingChatStore } from '../features/chat/floatingChatStore.js';
+import {
+  handleWorkspaceCreationCompletion,
+  isWorkspaceFormValid,
+  resolveStartHarness,
+  suggestedBranchName,
+  withStartHarness,
+} from '../features/workspace-launch/createWorkspaceFlow.js';
+import { HarnessPicker } from '../features/workspace-launch/HarnessPicker.js';
 
 /** Sentinel select value for ad-hoc repo picking. */
 const AD_HOC = '__ad-hoc__';
 
 const isVsCode = new URLSearchParams(window.location.search).get('env') === 'vscode';
-
-function suggestedBranchName(name: string): string {
-  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  return slug ? `feature/${slug}` : '';
-}
 
 const MODE_OPTIONS: Array<{ value: WorkspaceMode; icon: typeof Zap; title: string; body: string }> = [
   {
@@ -159,15 +162,22 @@ export function StartWorkPage() {
   const createWorkspace = useCreateWorkspace();
   const { progress, start, reset } = useCreationStream();
   const creationJobId = searchParams.get('job');
-  const openInChat = searchParams.get('from') === 'chat';
-  const openedChatWorkspace = useRef<string | null>(null);
+  const openedWorkspace = useRef<string | null>(null);
+  // True once this page instance has submitted a workspace itself. A ?job= link
+  // opened without submitting (and not from chat) only inspects a past job.
+  const [submittedHere, setSubmittedHere] = useState(false);
+  const isDirectReplay = Boolean(creationJobId) && !submittedHere && searchParams.get('from') !== 'chat';
 
   useEffect(() => {
-    if (!openInChat || progress.status !== 'completed' || !progress.workspaceId || openedChatWorkspace.current === progress.workspaceId) return;
-    openedChatWorkspace.current = progress.workspaceId;
-    floatingChatStore.openCli(progress.workspaceId);
-    navigate(`/workspaces/${encodeURIComponent(progress.workspaceId)}`);
-  }, [openInChat, progress.status, progress.workspaceId, navigate]);
+    openedWorkspace.current = handleWorkspaceCreationCompletion({
+      status: progress.status,
+      workspaceId: progress.workspaceId,
+      lastOpenedWorkspaceId: openedWorkspace.current,
+      autoNavigate: !isDirectReplay,
+      onOpenCli: (id) => floatingChatStore.openCli(id),
+      onNavigate: (url) => navigate(url),
+    });
+  }, [progress.status, progress.workspaceId, navigate, isDirectReplay]);
 
   const [projectId, setProjectId] = useState<string>(searchParams.get('project') ?? AD_HOC);
   const [workType, setWorkType] = useState<WorkGuidance['workType']>('feature');
@@ -181,6 +191,13 @@ export function StartWorkPage() {
   const [setupOpen, setSetupOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [assistants, setAssistants] = useState<string[]>([]);
+  // Empty until the developer picks a harness: nothing is ever preselected.
+  const [chosenHarness, setChosenHarness] = useState('');
+  const startHarness = resolveStartHarness({
+    chosen: chosenHarness,
+    installed: (aiDetect.data ?? []).filter((item) => item.detected).map((item) => item.name),
+  });
+  const instructionTargets = withStartHarness(assistants, startHarness);
   const [enabledSkills, setEnabledSkills] = useState<string[]>([]);
   const [enabledAgents, setEnabledAgents] = useState<string[]>([]);
   const [strategyId, setStrategyId] = useState<string>('');
@@ -268,6 +285,7 @@ export function StartWorkPage() {
 
   const returnToForm = () => {
     reset();
+    setSubmittedHere(false);
     setSearchParams((params) => {
       const next = new URLSearchParams(params);
       next.delete('job');
@@ -276,6 +294,7 @@ export function StartWorkPage() {
   };
 
   const startOver = () => {
+    setSubmittedHere(false);
     const url = new URL(window.location.href);
     url.hash = '#/new';
     window.location.replace(url.toString());
@@ -359,8 +378,12 @@ export function StartWorkPage() {
 
   const inPlace = mode === 'in-place';
   const worktreeBranch = branchName.trim() || suggestedBranchName(workspaceName);
-  const identityValid = workspaceName.trim().length > 0 && (inPlace || worktreeBranch.length > 0);
-  const formValid = identityValid && selectedRepos.length > 0 && description.trim().length > 0;
+  const formValid = isWorkspaceFormValid({
+    workspaceName,
+    mode,
+    branchName,
+    selectedRepoCount: selectedRepos.length,
+  });
 
   const applyStrategy = (id: string) => {
     setStrategyId(id);
@@ -401,6 +424,7 @@ export function StartWorkPage() {
   const submit = async () => {
     if (submittingRef.current || createWorkspace.isPending || !formValid) return;
     submittingRef.current = true;
+    setSubmittedHere(true);
     setSubmitError(null);
     const payload: CreateWorkspacePayload = {
       workType,
@@ -414,7 +438,7 @@ export function StartWorkPage() {
         existingBranch:
           !inPlace && branchOverrides[repo.path]?.trim() ? branchOverrides[repo.path].trim() : undefined,
       })),
-      assistants,
+      assistants: instructionTargets,
       enabledSkills: enabledSkills.length > 0 ? enabledSkills : undefined,
       enabledAgents: enabledAgents.length > 0 ? enabledAgents : undefined,
       domainPacks: selectedTags.length > 0 ? selectedTags : undefined,
@@ -423,6 +447,8 @@ export function StartWorkPage() {
     };
     try {
       const { jobId } = await createWorkspace.mutateAsync(payload);
+      // The job id is the workspace id. Setting the preference only puts the tool first on the start screen.
+      if (startHarness) floatingChatStore.setHarness(jobId, startHarness);
       start(jobId);
       setSearchParams((params) => {
         const next = new URLSearchParams(params);
@@ -443,13 +469,16 @@ export function StartWorkPage() {
 
   if (displayedProgress.status !== 'idle') {
     const failedStep = displayedProgress.steps.find((s) => s.status === 'failed');
+    // A creation started here navigates to the workspace as soon as it completes,
+    // so skip the "ready" actions rather than flashing them for a frame.
+    const openingWorkspace = displayedProgress.status === 'completed' && !isDirectReplay;
     return (
       <div className="mx-auto max-w-xl animate-fade-in">
         <h1 className="text-xl font-semibold">
           {displayedProgress.status === 'running'
             ? 'Setting up your workspace…'
             : displayedProgress.status === 'completed'
-              ? 'Workspace ready'
+              ? (openingWorkspace ? 'Opening your workspace…' : 'Workspace ready')
               : displayedProgress.status === 'failed'
                 ? 'Workspace creation failed'
                 : 'Unable to reconnect to workspace setup'}
@@ -483,11 +512,14 @@ export function StartWorkPage() {
         )}
         {submitError && <p className="mt-2 text-sm text-destructive-foreground">{submitError}</p>}
         <div data-testid="workspace-ready-actions" className="mt-6 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
-          {displayedProgress.status === 'completed' && displayedProgress.workspaceId && (
+          {displayedProgress.status === 'completed' && displayedProgress.workspaceId && !openingWorkspace && (
             <>
               <Button
                 className="w-full min-w-0 whitespace-normal sm:w-auto"
-                onClick={() => navigate(`/workspaces/${encodeURIComponent(displayedProgress.workspaceId!)}`)}
+                onClick={() => {
+                  floatingChatStore.openCli(displayedProgress.workspaceId!);
+                  navigate(`/workspaces/${encodeURIComponent(displayedProgress.workspaceId!)}`);
+                }}
               >
                 Open workspace
               </Button>
@@ -540,7 +572,7 @@ export function StartWorkPage() {
       <header className="mb-5">
         <h1 className="text-xl font-semibold">New workspace</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Pick repositories, describe the work, and name this workspace.
+          Pick repositories, name this workspace, and optionally describe the task.
         </p>
         <a
           href="#advanced-setup"
@@ -603,25 +635,35 @@ export function StartWorkPage() {
 
         </section>
 
-        {/* Task and name are the only required inputs after repositories. */}
+        {/* Workspace name (required) and task description (optional) */}
         <section>
           <label className="block">
-            <span className="mb-1 block text-sm font-medium">What do you want to do?</span>
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="e.g. Simplify workspace setup and clarify the navigation."
-              rows={3}
-            />
-          </label>
-          <label className="mt-4 block">
             <span className="mb-1 block text-sm font-medium">Workspace name</span>
             <Input
               value={workspaceName}
               onChange={(e) => setWorkspaceName(e.target.value)}
               placeholder="e.g. Simpler workspace setup"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing && formValid && !createWorkspace.isPending) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              autoFocus
             />
             <span className="mt-1 block text-xs text-muted-foreground">Shown in the workspace list; separate from a Git branch.</span>
+          </label>
+          <label className="mt-4 block">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-sm font-medium">What do you want to do?</span>
+              <span className="text-xs text-muted-foreground">optional</span>
+            </div>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g. Simplify workspace setup and clarify the navigation."
+              rows={2}
+            />
           </label>
           {suggestedMatches.length > 0 && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
@@ -650,6 +692,8 @@ export function StartWorkPage() {
             </div>
           )}
         </section>
+
+        <HarnessPicker harnesses={aiDetect.data ?? []} value={startHarness} onChange={setChosenHarness} loading={aiDetect.isLoading} />
 
         <section aria-label="Skills">
           {/* Skills Selection */}
@@ -720,16 +764,14 @@ export function StartWorkPage() {
                       )}
                     >
                       <div className="flex items-center gap-2 min-w-0">
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={isChecked}
-                          onChange={() =>
+                          onCheckedChange={() =>
                             setEnabledSkills((prev) =>
                               prev.includes(skill.id) ? prev.filter((id) => id !== skill.id) : [...prev, skill.id],
                             )
                           }
                           aria-label={`Select ${skill.title || skill.name}`}
-                          className="accent-primary"
                         />
                         <div className="min-w-0">
                           <p className="font-mono text-xs font-medium truncate text-foreground">
@@ -1038,7 +1080,7 @@ export function StartWorkPage() {
         <section className="rounded-lg border border-border bg-card p-4" aria-label="AI harnesses">
               <div>
                 <span className="mb-1.5 block text-sm font-medium">AI harnesses</span>
-                <p className="mb-3 text-xs text-muted-foreground">Choose which tools receive workspace instructions. This does not start a session or choose a default harness.</p>
+                <p className="mb-3 text-xs text-muted-foreground">Choose which tools receive workspace instructions. The tool you start with is always included. This does not start a session.</p>
                 <div className="flex flex-wrap gap-3">
                   {(aiDetect.data ?? []).map((assistant) => (
                     <label
@@ -1049,7 +1091,8 @@ export function StartWorkPage() {
                       )}
                     >
                       <Checkbox
-                        checked={assistants.includes(assistant.name)}
+                        checked={instructionTargets.includes(assistant.name)}
+                        disabled={assistant.name === startHarness}
                         onCheckedChange={() =>
                           setAssistants((prev) =>
                             prev.includes(assistant.name)
@@ -1158,11 +1201,12 @@ export function StartWorkPage() {
           </div>}
         </section>
 
-        <ResourcePreview skills={enabledSkills} agents={enabledAgents} assistants={assistants} tagCount={selectedTags.length} />
+        <ResourcePreview skills={enabledSkills} agents={enabledAgents} assistants={instructionTargets} tagCount={selectedTags.length} />
 
         {submitError && <p role="alert" className="text-sm text-destructive">{submitError}</p>}
 
-        <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
+        {/* Pinned so Create stays in reach however long the skills list is. */}
+        <div className="sticky bottom-0 z-10 flex items-center justify-between gap-4 border-t border-border bg-background/95 py-3 backdrop-blur">
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <FolderGit2 className="size-3.5" />
             {selectedRepos.length} repositor{selectedRepos.length === 1 ? 'y' : 'ies'} selected

@@ -96,7 +96,7 @@ export interface CreateWorkspacePayload {
   /** Human-readable workspace name; also used for the in-place workspace id. */
   name?: string;
   branchName?: string;
-  description: string;
+  description?: string;
   repos: Array<{ name: string; path: string; defaultBranch: string; existingBranch?: string }>;
   assistants: string[];
   teamworkInstructions?: string;

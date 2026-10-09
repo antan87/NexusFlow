@@ -310,10 +310,9 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.getByRole('button', { name: 'Create workspace' }).click();
 
     await expect.poll(() => workspaceBody?.mode).toBe('worktree');
-    await expect(page.getByRole('heading', { name: 'Workspace ready' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Open workspace' })).toBeVisible();
-    await page.getByRole('button', { name: 'Open workspace' }).click();
+    // Creation lands straight on the new workspace: no intermediate "Workspace ready" step.
     await expect(page).toHaveURL(/#\/workspaces\/demo-worktree/);
+    await expect(page.getByRole('heading', { name: 'Workspace ready' })).toHaveCount(0);
   });
 
   test('starts from repos, task, name, and skills without a size preset', async ({ page }) => {
@@ -343,8 +342,12 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.getByLabel('What do you want to do?').fill('Simplify creation');
     await expect(page.getByText('No skills or agents selected', { exact: false })).toBeVisible();
     await page.getByRole('checkbox', { name: 'Select Work lifecycle' }).check();
-    // Before anything is installed, the user sees each file and where it goes.
+    // The file listing stays out of the way until asked for: a one-line summary sits by Create.
     const preview = page.getByRole('region', { name: 'What this adds to the workspace' });
+    await expect(preview).toContainText('1 skill · 1 file');
+    await expect(preview.getByText('.agents/skills/work-lifecycle/SKILL.md')).toBeHidden();
+    // Before anything is installed, the user can still see each file and where it goes.
+    await preview.getByRole('button', { name: /What this adds to the workspace/ }).click();
     await expect(preview).toContainText('Work lifecycle');
     await expect(preview).toContainText('.agents/skills/work-lifecycle/SKILL.md');
     expect(previewRequest).toMatchObject({ skills: ['work-lifecycle'], agents: [] });
@@ -522,6 +525,189 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.getByRole('button', { name: 'Create workspace' }).click();
 
     await expect.poll(() => workspaceBody?.mode).toBe('in-place');
+  });
+
+  test('keeps Create workspace in reach however long the skills list is', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 520 });
+    await page.route('**/api/skills', (route) => route.fulfill({
+      json: { skills: Array.from({ length: 30 }, (_, i) => ({ id: `skill-${i}`, name: `skill-${i}`, title: `Skill ${i}`, description: 'Guidance' })) },
+    }));
+    await page.goto('/#/new');
+    await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
+    await expect(page.getByRole('checkbox', { name: 'Select Skill 29' })).toBeAttached();
+    await expect(page.getByRole('button', { name: 'Create workspace' })).toBeInViewport();
+  });
+
+  test('creates a workspace from just a name: name is focused first, Enter submits, description is optional', async ({ page }) => {
+    await mockCompletedCreationStream(page);
+    let payload: any = null;
+    await page.route('**/api/workspace', async (route) => {
+      payload = route.request().postDataJSON();
+      await route.fulfill({ json: { success: true, jobId: 'quick-start' } });
+    });
+
+    await page.goto('/#/new');
+    await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
+
+    const name = page.getByLabel('Workspace name');
+    const description = page.getByLabel('What do you want to do?');
+    await expect(name).toBeFocused();
+    // The name is asked for before the optional description.
+    const nameBox = await name.boundingBox();
+    const descriptionBox = await description.boundingBox();
+    expect(nameBox!.y).toBeLessThan(descriptionBox!.y);
+    await expect(page.locator('label', { has: description }).getByText('optional', { exact: true })).toBeVisible();
+
+    // Without a repository the form is not valid, so Enter must not create anything.
+    await name.fill('Quick start');
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
+    expect(payload).toBeNull();
+
+    await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
+    await name.focus();
+    await page.keyboard.press('Enter');
+
+    await expect.poll(() => payload?.name).toBe('Quick start');
+    expect(payload.description).toBe('');
+    // Straight to the workspace: no "Workspace ready" step to click through.
+    await expect(page).toHaveURL(/#\/workspaces\/quick-start/);
+    await expect(page.getByRole('heading', { name: 'Workspace ready' })).toHaveCount(0);
+  });
+
+  test.describe('choosing the harness to start with', () => {
+    // The explicit `[value, { option: true }]` form: Playwright reads a bare array here as that tuple and keeps
+    // only its first element, so a plain list of tools would reach the app as a single object.
+    test.use({
+      aiDetectData: [[
+        { name: 'claude', displayName: 'Claude Code', detected: true, command: 'claude' },
+        { name: 'codex', displayName: 'OpenAI Codex', detected: true, command: 'codex' },
+        { name: 'copilot', displayName: 'GitHub Copilot', detected: false },
+        { name: 'pi', displayName: 'Pi', detected: true, command: 'pi' },
+      ], { option: true }],
+    });
+
+    const pickerOf = (page: Page) => page.getByRole('radiogroup', { name: 'Start with' });
+
+    test('shows each tool with its logo and installed state, and only lets installed ones be chosen', async ({ page }) => {
+      await page.goto('/#/new');
+      const picker = pickerOf(page);
+      await expect(picker.getByRole('radio')).toHaveCount(4);
+      for (const name of ['Claude Code', 'Codex', 'Pi']) {
+        const card = picker.getByRole('radio', { name, exact: true });
+        await expect(card).toBeEnabled();
+        await expect(card).toContainText('Installed');
+        await expect(card.locator('svg').first()).toBeVisible();
+      }
+      const copilot = picker.getByRole('radio', { name: 'GitHub Copilot', exact: true });
+      await expect(copilot).toBeDisabled();
+      await expect(copilot).toContainText('Not installed');
+      // Nothing is chosen for you the first time.
+      await expect(picker.getByRole('radio', { checked: true })).toHaveCount(0);
+    });
+
+    test('creating with a chosen tool includes it in the instructions and makes it the preferred tool on the start screen', async ({ page }) => {
+      await mockCompletedCreationStream(page);
+      let payload: any = null;
+      await page.route('**/api/workspace', async (route) => {
+        payload = route.request().postDataJSON();
+        await route.fulfill({ json: { success: true, jobId: 'harness-start' } });
+      });
+      await page.goto('/#/new');
+      await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
+      await page.getByLabel('Workspace name').fill('Harness start');
+      const codex = pickerOf(page).getByRole('radio', { name: 'Codex', exact: true });
+      await codex.click();
+      await expect(codex).toBeChecked();
+      await page.getByRole('button', { name: 'Create workspace' }).click();
+
+      // The chosen tool receives the workspace instructions without being ticked under Advanced setup.
+      await expect.poll(() => payload?.assistants).toEqual(['codex']);
+      await expect(page).toHaveURL(/#\/workspaces\/harness-start/);
+      await expect.poll(() => page.evaluate(() => {
+        const saved = JSON.parse(localStorage.getItem('contextspace_floating_chat_state_v1') ?? '{}');
+        return saved.harnesses?.['harness-start'];
+      })).toBe('codex');
+    });
+
+    test('moves with the arrow keys, skipping tools that are not installed', async ({ page }) => {
+      await page.goto('/#/new');
+      const picker = pickerOf(page);
+      await picker.getByRole('radio', { name: 'Claude Code', exact: true }).focus();
+      await page.keyboard.press('ArrowRight');
+      await expect(picker.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
+      await page.keyboard.press('ArrowRight');
+      await expect(picker.getByRole('radio', { name: 'Pi', exact: true })).toBeChecked();
+      await expect(picker.getByRole('radio', { name: 'Pi', exact: true })).toBeFocused();
+      await page.keyboard.press('ArrowRight');
+      await expect(picker.getByRole('radio', { name: 'Claude Code', exact: true })).toBeChecked();
+      await page.keyboard.press('ArrowLeft');
+      await expect(picker.getByRole('radio', { name: 'Pi', exact: true })).toBeChecked();
+    });
+
+    test('"Choose later" clears the pick, and nothing is sent for it', async ({ page }) => {
+      let payload: any = null;
+      await page.route('**/api/workspace', async (route) => {
+        payload = route.request().postDataJSON();
+        await route.fulfill({ json: { success: true, jobId: 'no-harness' } });
+      });
+      await page.goto('/#/new');
+      const picker = pickerOf(page);
+      await picker.getByRole('radio', { name: 'Claude Code', exact: true }).click();
+      await expect(picker.getByRole('radio', { name: 'Claude Code', exact: true })).toBeChecked();
+
+      await page.getByRole('button', { name: 'Choose later' }).click();
+      await expect(picker.getByRole('radio', { checked: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Choose later' })).toHaveCount(0);
+
+      await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
+      await page.getByLabel('Workspace name').fill('No harness');
+      await page.getByRole('button', { name: 'Create workspace' }).click();
+      await expect.poll(() => payload?.name).toBe('No harness');
+      expect(payload.assistants).toEqual([]);
+    });
+
+    test('never preselects a tool: not the first one, not the one used for the last workspace', async ({ page }) => {
+      await mockCompletedCreationStream(page);
+      // Builds that remembered the last pick left this behind; it must not choose anything now.
+      await page.addInitScript(() => localStorage.setItem('contextspace_start_harness_v1', 'codex'));
+      await page.route('**/api/workspace', async (route) => {
+        await route.fulfill({ json: { success: true, jobId: 'first-with-codex' } });
+      });
+      await page.goto('/#/new');
+      const picker = pickerOf(page);
+      await expect(picker.getByRole('radio')).toHaveCount(4);
+      await expect(picker.getByRole('radio', { checked: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Choose later' })).toHaveCount(0);
+
+      await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
+      await page.getByLabel('Workspace name').fill('First with Codex');
+      await picker.getByRole('radio', { name: 'Codex', exact: true }).click();
+      await page.getByRole('button', { name: 'Create workspace' }).click();
+      await expect(page).toHaveURL(/#\/workspaces\/first-with-codex/);
+      // Leave through a page that has really rendered, so the finished form is gone before the next one starts.
+      await page.goto('/#/overview');
+      await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+      // Starting the next workspace begins with nothing chosen again, in the same window and after a reload.
+      await page.goto('/#/new');
+      await expect(picker.getByRole('radio')).toHaveCount(4);
+      await expect(picker.getByRole('radio', { checked: true })).toHaveCount(0);
+      await page.reload();
+      await expect(picker.getByRole('radio')).toHaveCount(4);
+      await expect(picker.getByRole('radio', { checked: true })).toHaveCount(0);
+    });
+
+    test('lists the chosen tool under Advanced setup as always included', async ({ page }) => {
+      await page.goto('/#/new');
+      await pickerOf(page).getByRole('radio', { name: 'Claude Code', exact: true }).click();
+      await page.getByRole('button', { name: 'Advanced setup' }).click();
+      const instructions = page.getByRole('region', { name: 'AI harnesses' });
+      await expect(instructions.getByText('The tool you start with is always included.')).toBeVisible();
+      const chosen = instructions.getByRole('checkbox', { name: /Claude Code/ });
+      await expect(chosen).toBeChecked();
+      await expect(chosen).toBeDisabled();
+      await expect(instructions.getByRole('checkbox', { name: /OpenAI Codex/ })).toBeEnabled();
+    });
   });
 
   test('should save settings changes', async ({ page }) => {
