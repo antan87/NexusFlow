@@ -277,7 +277,7 @@ If \`ctxspace\` is not on PATH, use \`./.contextspace/bin/ctxspace\` (bash) or \
 
 - \`${PRIMARY_KNOWLEDGE_FILE}\` — decisions and gotchas, one per \`###\` heading. Use MCP \`search_knowledge\`; if the MCP server is not connected, inspect headings, not the whole file. Add via \`${CLI_NAME} knowledge add -t decision|gotcha --title "..." -m "..."\`; without CLI, append a \`### <YYYY-MM-DD> — <Title>\` heading directly. Record a rule and reason that cannot be recovered from the code or git history. Avoid restating structure the code already shows.
 - \`contextspace-milestones.md\` — authored delivery order, questions with owners/status, existing work and deferred decisions; refresh preserves it.
-- \`${PRIMARY_PLAN_FILE}\` — generated milestones and dependencies; use Plan or MCP \`update_milestone_plan\`.
+- \`${PRIMARY_PLAN_FILE}\` — generated: current work, then package order (not a delivery plan); edit milestones via Plan or MCP \`update_milestone_plan\`.
 - \`contextspace-work.json\` — assignment and sources. Read live guidance with \`ctxspace flow --assignment\` or MCP \`get_work_context\`.
 - \`.agents/skills/\` — enabled playbooks; Claude copies: \`.claude/skills/\`.
 - Need the user's answer or approval? Call MCP \`request_user_input\` (one short question) so this chat is flagged, then ask in the chat and end your turn. No MCP: just ask.

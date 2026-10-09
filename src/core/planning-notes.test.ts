@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ensurePlanningNotes, readPlanningNotes, savePlanningNotes, PLANNING_NOTES_FILE } from './planning-notes.js';
+import { ensurePlanningNotes, readPlanningNotes, savePlanningNotes, hasAuthoredPlanningRows, planningNotesAreAuthored, PLANNING_NOTES_FILE } from './planning-notes.js';
 import { ensureWorkGuidance, loadWorkGuidance, WORK_GUIDANCE_FILE } from './work-guidance.js';
 import { LocalStorageAdapter } from './adapters/local-storage.js';
 import { setActiveStorageProvider } from './adapters/registry.js';
@@ -54,4 +54,23 @@ it('routes authored documents through configured storage and recovers from write
   expect(read).toHaveBeenCalledWith(root, 'notes', PLANNING_NOTES_FILE);
   expect(documents.get(PLANNING_NOTES_FILE)).toBe('recovered');
   await expect(fs.stat(path.join(root, PLANNING_NOTES_FILE))).rejects.toMatchObject({ code: 'ENOENT' });
+});
+it('tells the empty planning-notes template from notes that have been written', async () => {
+  await ensurePlanningNotes(root, 'notes');
+  const initial = await readPlanningNotes(root);
+  expect(hasAuthoredPlanningRows(initial.content)).toBe(false);
+  expect(await planningNotesAreAuthored(root)).toBe(false);
+  await savePlanningNotes(root, initial.revision, initial.content.replace('| --- | --- | --- | --- | --- |\n', '| --- | --- | --- | --- | --- |\n| m1 | Ship the producer | api | none | first |\n'));
+  expect(await planningNotesAreAuthored(root)).toBe(true);
+});
+it('does not count prose, table headers or separators as authored planning rows', () => {
+  expect(hasAuthoredPlanningRows('')).toBe(false);
+  expect(hasAuthoredPlanningRows('# Plan\n\nSome prose that mentions | a pipe.\n')).toBe(false);
+  expect(hasAuthoredPlanningRows('| A | B |\n| --- | --- |\n')).toBe(false);
+  expect(hasAuthoredPlanningRows('| A | B |\r\n| :--- | ---: |\r\n')).toBe(false);
+  expect(hasAuthoredPlanningRows('| A | B |\n| --- | --- |\n| 1 | 2 |\n')).toBe(true);
+});
+it('never throws when the planning notes cannot be read', async () => {
+  await fs.rm(path.join(root, 'contextspace.json'));
+  expect(await planningNotesAreAuthored(root)).toBe(false);
 });
