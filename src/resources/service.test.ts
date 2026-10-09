@@ -89,7 +89,8 @@ describe('resource administration service', () => {
     const put = async (id: string, name: string, scope: string) => {
       const dir = path.join(workspace, '.agents', 'skills', id);
       await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(path.join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: Example\nscope: ${scope}\n---\nExample`);
+      // Names a category, so the only notices are the three this test is about.
+      await fs.writeFile(path.join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: Example\ncategory: testing\nscope: ${scope}\n---\nExample`);
     };
     await saveSkill({ name: 'shadowed', description: 'Global', content: 'Global' });
     await put('shadowed', 'shadowed', 'workspace');

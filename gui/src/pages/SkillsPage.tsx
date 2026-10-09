@@ -47,6 +47,7 @@ import {
   useSaveSkillCategory,
   useDeleteSkillCategory,
   useSkills,
+  useSkillDiagnostics,
   useSaveSkill,
   useDeleteSkill,
   useWorkspaceSkills,
@@ -54,6 +55,7 @@ import {
   useWorkspaces,
   useDomainPacks,
 } from '../lib/api/queries.js';
+import { SkillDiagnosticsPanel } from '../features/skills/SkillDiagnosticsPanel.js';
 import type { SkillCategory, SkillItem } from '../types.js';
 
 // Available icons
@@ -121,6 +123,9 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
   // Queries & Mutations
   const { data: categories = [], isLoading: loadingCategories } = useSkillCategories();
   const { data: skills = [], isLoading: loadingSkills } = useSkills(
+    selectedWorkspace !== 'global' ? selectedWorkspace : undefined,
+  );
+  const { data: skillDiagnostics = [] } = useSkillDiagnostics(
     selectedWorkspace !== 'global' ? selectedWorkspace : undefined,
   );
   const { data: workspaces = [] } = useWorkspaces();
@@ -552,6 +557,12 @@ export function SkillsPage({ showToast }: SkillsPageProps) {
           </Button>
         </div>
       </div>
+
+      {skillDiagnostics.length > 0 && (
+        <div className="px-6 pt-4">
+          <SkillDiagnosticsPanel diagnostics={skillDiagnostics} />
+        </div>
+      )}
 
       {/* Search and Filter Ribbon */}
       <div className="px-6 py-3 border-b border-border/60 bg-muted/20 flex items-center justify-between gap-4">

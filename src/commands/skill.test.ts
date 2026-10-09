@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as skillsCatalog from '../utils/skills-catalog.js';
 import * as resolveUtil from '../utils/resolve-workspace.js';
 import * as refreshCore from '../core/refresh.js';
-import { skillListCommand, skillCreateCommand, skillDeleteCommand, skillShowCommand } from './skill.js';
+import { skillListCommand, skillLintCommand, skillCreateCommand, skillDeleteCommand, skillShowCommand } from './skill.js';
 
 vi.mock('../utils/skills-catalog.js');
 vi.mock('../utils/resolve-workspace.js');
@@ -44,6 +44,77 @@ describe('skill CLI commands', () => {
     }));
     vi.mocked(skillsCatalog.deleteSkill).mockResolvedValue(undefined);
     vi.mocked(refreshCore.refreshWorkspace).mockResolvedValue({} as any);
+  });
+
+  describe('skillLintCommand', () => {
+    const withDiagnostics = (diagnostics: skillsCatalog.SkillDiagnostic[]) =>
+      vi.mocked(skillsCatalog.getAllSkills).mockImplementation(async (_workspace, sink) => {
+        sink?.push(...diagnostics);
+        return [...sampleSkills];
+      });
+    const failing: skillsCatalog.SkillDiagnostic = { id: 'broken-skill', scope: 'global', level: 'error', message: 'Rename the folder to "broken-skill".' };
+    const review: skillsCatalog.SkillDiagnostic = { id: 'plain-skill', scope: 'workspace', level: 'warning', message: 'No category is set.' };
+
+    beforeEach(() => { process.exitCode = undefined; });
+    afterEach(() => { process.exitCode = undefined; vi.restoreAllMocks(); });
+
+    it('says there is nothing to fix and succeeds when every skill loads', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await skillLintCommand(mockWsPath, {});
+
+      expect(log.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('2 skills loaded, nothing to fix');
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('lists each problem with what to fix, and fails when a skill was not loaded', async () => {
+      withDiagnostics([failing, review]);
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await skillLintCommand(mockWsPath, {});
+
+      const output = log.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(output).toContain('broken-skill');
+      expect(output).toContain('Rename the folder to "broken-skill".');
+      expect(output).toContain('plain-skill');
+      expect(output).toContain('No category is set.');
+      expect(output).toContain('1 not loaded, 1 to review');
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('treats a diagnostic with no level as an error', async () => {
+      withDiagnostics([{ id: 'legacy', scope: 'global', message: 'Skipped.' }]);
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      await skillLintCommand(mockWsPath, {});
+
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('does not fail on warnings alone, unless --strict', async () => {
+      withDiagnostics([review]);
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await skillLintCommand(mockWsPath, {});
+      expect(process.exitCode).toBeUndefined();
+
+      await skillLintCommand(mockWsPath, { strict: true });
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('prints machine-readable output with the counts', async () => {
+      withDiagnostics([failing, review]);
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      await skillLintCommand(mockWsPath, { json: true });
+
+      expect(JSON.parse(log.mock.calls[0]![0])).toEqual({ skills: 2, errors: 1, warnings: 1, diagnostics: [failing, review] });
+    });
+
+    it('fails clearly when the named workspace cannot be found', async () => {
+      vi.mocked(resolveUtil.resolveWorkspaceQuiet).mockRejectedValue(new Error('Workspace "nope" not found.'));
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await skillLintCommand('nope', {});
+
+      expect(error.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('Workspace "nope" not found.');
+      expect(process.exitCode).toBe(1);
+    });
   });
 
   describe('skillListCommand', () => {

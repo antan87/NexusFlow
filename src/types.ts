@@ -951,6 +951,8 @@ export interface SkillItem {
   title?: string;
   /** Category ID or Name this skill belongs to. */
   category: string;
+  /** Set when SKILL.md names no category, so `category` is the assumed 'general' rather than a choice. */
+  categoryAssumed?: boolean;
   /** Trigger description and instructions overview. */
   description: string;
   /** Tags / Keywords for discovery. */

@@ -399,6 +399,15 @@ export interface SkillSupportingFile {
   content?: string;
 }
 
+/** A skill that did not load, or loaded with something to fix. Mirrors the server's SkillDiagnostic. */
+export interface SkillDiagnosticItem {
+  id: string;
+  scope: string;
+  message: string;
+  /** 'error': not loaded. 'warning': loaded, but something is off. Absent means 'error'. */
+  level?: 'error' | 'warning';
+}
+
 export interface SkillItem {
   id: string;
   name: string;

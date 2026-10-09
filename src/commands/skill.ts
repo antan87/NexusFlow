@@ -8,7 +8,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import fse from 'fs-extra';
 
-import { getAllSkills, saveSkill, deleteSkill, type SkillItem } from '../utils/skills-catalog.js';
+import { getAllSkills, saveSkill, deleteSkill, type SkillDiagnostic, type SkillItem } from '../utils/skills-catalog.js';
 import { resolveWorkspaceInteractive, resolveWorkspaceQuiet } from '../utils/resolve-workspace.js';
 import { refreshWorkspace } from '../core/refresh.js';
 import { BRAND_NAME } from '../core/constants.js';
@@ -84,6 +84,59 @@ export async function skillListCommand(workspaceArg?: string, options: SkillList
     }
     console.log('');
   }
+}
+
+export interface SkillLintOptions {
+  json?: boolean;
+  /** Also fail (exit code 1) when a skill loads but has something to review. */
+  strict?: boolean;
+}
+
+/**
+ * `ctxspace skill lint`: report every skill that was not loaded, or loads with a problem, using the
+ * same diagnostics the Skills page shows. Exits non-zero when a skill was not loaded (or, with
+ * `--strict`, when anything is reported), so a script or CI job can gate on it.
+ */
+export async function skillLintCommand(workspaceArg?: string, options: SkillLintOptions = {}): Promise<void> {
+  let workspacePath: string | null = null;
+  if (workspaceArg) {
+    try {
+      workspacePath = await resolveWorkspaceQuiet(workspaceArg);
+    } catch (error) {
+      console.error(chalk.red(`\nError: ${error instanceof Error ? error.message : String(error)}\n`));
+      process.exitCode = 1;
+      return;
+    }
+  } else {
+    workspacePath = await resolveWorkspaceQuiet().catch(() => null);
+  }
+
+  const diagnostics: SkillDiagnostic[] = [];
+  const skills = await getAllSkills(workspacePath || undefined, diagnostics);
+  const isError = (d: SkillDiagnostic) => (d.level ?? 'error') === 'error';
+  const errors = diagnostics.filter(isError);
+  const warnings = diagnostics.filter((d) => !isError(d));
+  if (errors.length > 0 || (options.strict && warnings.length > 0)) process.exitCode = 1;
+
+  if (options.json) {
+    console.log(JSON.stringify({ skills: skills.length, errors: errors.length, warnings: warnings.length, diagnostics }, null, 2));
+    return;
+  }
+
+  console.log(chalk.bold.cyan(`\n🔎 ${BRAND_NAME} — Skill check\n`));
+  if (workspacePath) console.log(chalk.dim('Workspace: ') + chalk.bold(path.basename(workspacePath)) + '\n');
+
+  if (diagnostics.length === 0) {
+    console.log(chalk.green(`  ✔ ${skills.length} skills loaded, nothing to fix.\n`));
+    return;
+  }
+  for (const d of diagnostics) {
+    const mark = isError(d) ? chalk.red('✖') : chalk.yellow('⚠');
+    console.log(`  ${mark} ${chalk.bold(d.id)} ${chalk.dim(`(${d.scope})`)}`);
+    console.log(`    ${d.message}`);
+  }
+  console.log('');
+  console.log(`  ${skills.length} skills loaded; ${errors.length} not loaded, ${warnings.length} to review.\n`);
 }
 
 export interface SkillCreateOptions {

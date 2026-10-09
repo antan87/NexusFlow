@@ -91,6 +91,50 @@ test.describe('Resource Library', () => {
       enabledCategories: ['general'],
     });
   });
+
+  test('shows skills that did not load, and what to fix, on the global Skills page', async ({ page }) => {
+    await page.route('**/api/skills**', async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === '/api/skills/categories') return route.fulfill({ json: { categories: [] } });
+      if (pathname === '/api/skills') {
+        return route.fulfill({
+          json: {
+            skills: [skill],
+            diagnostics: [
+              { id: 'wrong-folder', scope: 'global', level: 'error', message: 'Skill name "other" must match directory identity "wrong-folder". Rename the folder to "other", or change name: to "wrong-folder" in SKILL.md.' },
+              { id: 'plain-skill', scope: 'global', level: 'warning', message: 'No category is set in SKILL.md, so this skill is listed under "general". Add "category: <name>" to its frontmatter.' },
+            ],
+          },
+        });
+      }
+      return route.fallback();
+    });
+
+    await page.goto('/#/skills');
+    await expect(page.getByRole('heading', { name: 'Skill Library' })).toBeVisible();
+
+    const notices = page.getByRole('status').filter({ hasText: 'Skill discovery notices' });
+    await expect(notices).toContainText('wrong-folder (global) — not loaded: Skill name "other" must match');
+    await expect(notices).toContainText('Rename the folder to "other"');
+    // A warning is not "not loaded": the skill is there, it is only filed under "general".
+    await expect(notices).toContainText('plain-skill (global): No category is set');
+    await expect(notices).not.toContainText('plain-skill (global) — not loaded');
+    await expect(notices).toContainText('ctxspace skills lint');
+  });
+
+  test('shows no notices on the global Skills page when every skill loads', async ({ page }) => {
+    await page.route('**/api/skills**', async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === '/api/skills/categories') return route.fulfill({ json: { categories: [] } });
+      if (pathname === '/api/skills') return route.fulfill({ json: { skills: [skill], diagnostics: [] } });
+      return route.fallback();
+    });
+
+    await page.goto('/#/skills');
+    await expect(page.getByRole('heading', { name: 'Skill Library' })).toBeVisible();
+    await expect(page.getByText('Showing', { exact: false }).first()).toBeVisible();
+    await expect(page.getByText('Skill discovery notices')).toHaveCount(0);
+  });
 });
 
 test.describe('Workspace resource diagnostics', () => {
