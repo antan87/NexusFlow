@@ -44,6 +44,7 @@ import type {
   WorkGuidance,
   ProgressFacts,
   RepoChangeListing,
+  WorkspaceBackupStatus,
 } from '../../types.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -714,6 +715,23 @@ export function useWorkGuidance(wsId: string | null) {
     queryFn: async ({ signal }) => (await apiFetch<{ guidance: WorkGuidance }>(`/api/workspace/${encodeURIComponent(wsId!)}/work`, { signal })).guidance,
     enabled: Boolean(wsId),
     staleTime: 10_000,
+  });
+}
+
+// ─── Backup status (would the hand-written notes survive losing this computer) ──
+
+/**
+ * Read-only. The server has no route that adds a remote or pushes, so the notice built on this
+ * only shows the commands to run; it cannot run them.
+ */
+export function useWorkspaceBackup(workspaceId: string) {
+  return useQuery({
+    queryKey: ['workspace-backup', workspaceId],
+    queryFn: ({ signal }) =>
+      apiFetch<{ backup: WorkspaceBackupStatus }>(`/api/workspace/${encodeURIComponent(workspaceId)}/backup`, { signal }),
+    select: (data) => data.backup,
+    staleTime: 60_000,
+    retry: false,
   });
 }
 
