@@ -34,8 +34,12 @@ test('reviews the actual worktree, switches diff mode, and copies refinement fee
   await expect(sideBySide).toHaveAttribute('aria-pressed', 'true');
   // Accepting a change needs a caller that can apply it; the review does not offer it.
   await diffToolbar.getByRole('button', { name: 'More diff options' }).click();
+  // Only an open menu can show that the item is absent, and only one that has opened can be closed by Escape.
+  const moreOptions = page.getByRole('menu', { name: 'More diff options' });
+  await expect(moreOptions).toBeVisible();
   await expect(page.getByRole('menuitem', { name: /Accept this change/ })).toHaveCount(0);
   await page.keyboard.press('Escape');
+  await expect(moreOptions).toBeHidden();
   await diffToolbar.getByRole('button', { name: /Refine/ }).click();
   await page.getByPlaceholder('e.g. Ensure null safety when calculating vacation debt...').fill('Use answer 3 instead.');
   await page.getByRole('button', { name: 'Copy for CLI chat', exact: true }).click();

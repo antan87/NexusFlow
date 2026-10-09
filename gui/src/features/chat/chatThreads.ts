@@ -48,19 +48,11 @@ export function threadSummary({ branch, facts, guidance, description, waiting, q
   return { branch, goal, tone: state.tone, label: state.label, finished: state.tone === 'done', question: '' };
 }
 
-/** What needs the developer comes first, finished work last. */
-const RANK: Record<StripTone, number> = { needs: 0, reopened: 1, ai: 2, idle: 3, done: 4 };
-
-/** The list order: by what needs attention, and in the order the chats were opened within each group. */
-export function sortThreads<T extends { tone: StripTone }>(threads: readonly T[]): T[] {
-  return threads
-    .map((thread, index) => ({ thread, index }))
-    .sort((a, b) => RANK[a.thread.tone] - RANK[b.thread.tone] || a.index - b.index)
-    .map(({ thread }) => thread);
-}
-
-/** One line for a screen reader or a tooltip: "Goal. State." or "Goal. Waiting for you: question", with whichever parts exist. */
-export function threadNote(summary: Pick<ThreadSummary, 'goal' | 'label'> & { question?: string }): string {
-  const state = summary.question ? `${summary.label}: ${summary.question}` : summary.label;
-  return [summary.goal, state].filter(Boolean).join('. ');
+/**
+ * Whether the open chats' progress should be read from the server. Only the sidebar shows it, so it is read while the
+ * full sidebar is showing and the window is being looked at; the rail shows no summaries, and a window nobody is
+ * looking at needs none.
+ */
+export function shouldReadThreads({ sidebarExpanded, windowAttentive }: { sidebarExpanded: boolean; windowAttentive: boolean }): boolean {
+  return sidebarExpanded && windowAttentive;
 }

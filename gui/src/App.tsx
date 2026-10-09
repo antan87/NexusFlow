@@ -22,6 +22,7 @@ import { cn } from './lib/utils.js';
 import { perfMark, perfMarkOnce } from './lib/perfMarks.js';
 import { changesFromResponse } from './features/changes/utils/changesResponse.js';
 import { parseSection, type WorkspaceSection } from './features/workspace-shell/destinations.js';
+import { useWorkspaceShortcuts } from './features/workspace-shell/useWorkspaceShortcuts.js';
 
 // Route-level code splitting: each page (and its dependency subtree, e.g. the
 // markdown pipeline under WorkspacesPage) loads on first navigation instead of
@@ -191,6 +192,7 @@ function AppInner() {
   const onStatusRoute = ['/', '/overview', '/dashboard'].includes(location.pathname) || location.pathname.startsWith('/workspaces');
   const queryClient = useQueryClient();
   const workspacesQuery = useWorkspaces();
+  useWorkspaceShortcuts();
   useEffect(() => { if (config) perfMarkOnce('cs:shell'); }, [config]);
   const statusesQuery = useWorkspacesStatus({
     enabled: configExists && !configLoading && onStatusRoute,
@@ -809,6 +811,8 @@ function AppInner() {
     const p = location.pathname;
     if (p.startsWith('/workspaces')) {
       const parts = p.split('/').filter(Boolean); // ['workspaces', id?, tab?]
+      // Choosing which chat a route opens is the chat slot's job: it tells a user's own navigation from a stale one
+      // and does not reopen a chat that was closed. Revealing it here as well would undo both.
       setActiveWsId(parts[1] ? decodeURIComponent(parts[1]) : null);
       // One list of sections, shared with the workspace navigation: no section opens the chat.
       setSubTab(parseSection(parts[2]));
@@ -1155,7 +1159,6 @@ Core Instructions:
         workspaceStatuses={workspaceStatuses}
         workspacesLoading={workspacesLoading}
         activeWsId={activeWsId}
-        onSelectWorkspace={(id) => navigate(`/workspaces/${encodeURIComponent(id)}`)}
         onCheckForUpdates={() => { void handleCheckForUpdates(); }}
         checkingForUpdates={['checking', 'downloading'].includes(updateStatus?.nativeStatus ?? '')}
       />

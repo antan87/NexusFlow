@@ -9,7 +9,9 @@ import { IconButton } from '../../components/ui/icon-button.js';
 import { Menu, MenuItem, MenuPopup, MenuSearchInput, MenuTrigger } from '../../components/ui/menu.js';
 import { HarnessIcon, harnessName } from '../../components/icons/HarnessIcon.js';
 import { History, RefreshCw, ExternalLink, Square, Search, Copy, PlugZap, WifiOff, MoreHorizontal } from 'lucide-react';
-import { useFloatingChat } from '../chat/floatingChatStore.js';
+import { floatingChatStore, useFloatingChat } from '../chat/floatingChatStore.js';
+import { browserPath } from '../chat/chatRoute.js';
+import { resolveWorkspaceShortcut } from '../workspace-shell/sessionShortcuts.js';
 import { ResumeSessions } from './ResumeSessions.js';
 import { findTerminalUsageSession, SessionUsageDetails } from './SessionUsage.js';
 import { apiFetch } from '../../lib/api/client.js';
@@ -250,8 +252,12 @@ export function TerminalPane({ workspace, active, launch, consumeLaunch, onOpenF
       }
     };
     terminalHost.addEventListener('paste', onPaste, true);
+    // The same question the window asks, so a key the app will not use reaches the CLI.
+    const isSessionKey = (event: Parameters<typeof terminalKeyAction>[0]) => resolveWorkspaceShortcut({
+      event, openTabs: floatingChatStore.getState().openTabs, activeTab: floatingChatStore.getState().activeTab, pathname: browserPath(),
+    }) !== null;
     term.attachCustomKeyEventHandler(event => {
-      switch (terminalKeyAction(event, term.hasSelection())) {
+      switch (terminalKeyAction(event, term.hasSelection(), isSessionKey)) {
         case 'copy':
           event.preventDefault();
           void safeCopyToClipboard(term.getSelection()).then(copied => {

@@ -9,8 +9,9 @@ import { test, expect } from './fixtures';
  *   1. The "Choose a workspace for CLI chat" empty state rendered
  *      `workspaces.slice(0, 5)` and offered no search field, so a sixth
  *      workspace onward was simply unreachable from that screen.
- *   2. The "Search workspaces..." field inside the "Add workspace" menu popup
- *      could not be typed into. Base UI's `useTypeahead` attaches an
+ *   2. The search field inside a menu popup could not be typed into (first seen
+ *      in the "Add workspace" menu; the terminal's "Pane options" menu has the
+ *      same kind of field). Base UI's `useTypeahead` attaches an
  *      `onKeyDown` to the menu popup that calls `preventDefault()` on every
  *      single-character key while the menu is open, without checking whether
  *      the event target is an editable element. The character never reaches
@@ -49,11 +50,16 @@ function workspaceButton(chat: import('@playwright/test').Locator, branch: strin
   return chat.getByRole('button', { name: new RegExp(`^${branch}\\b`) });
 }
 
-/** Open the CLI chat on a workspace and close its only tab, so the empty state shows. */
+/** An open chat is a session in the sidebar; the one on screen is the current page. */
+function sessionLink(page: import('@playwright/test').Page, branch: string) {
+  return page.locator(`aside.context-sidebar [data-sidebar-session="${branch}"]`);
+}
+
+/** Open the CLI chat on a workspace and close its only session, so the empty state shows. */
 async function openEmptyCliChat(page: import('@playwright/test').Page, first = 'alpha') {
   await page.goto(`/#/workspaces/${first}/chat`);
   const chat = page.getByRole('region', { name: 'CLI Chat' });
-  await chat.getByRole('tab', { name: `Show ${first} in the left pane` }).focus();
+  await sessionLink(page, first).focus();
   await page.keyboard.press('Delete');
   await expect(chat.getByRole('heading', { name: 'Choose a workspace for CLI chat' })).toBeVisible();
   return chat;
@@ -95,72 +101,70 @@ test('a search that matches nothing says so instead of listing everything', asyn
   await expect(workspaceButton(chat, 'alpha')).toHaveCount(0);
 });
 
-test('typing into the search field in the Add workspace menu actually filters', async ({ page }) => {
-  const chat = await openEmptyCliChat(page);
-
-  await chat.getByRole('button', { name: 'Add workspace' }).click();
-  const menu = page.getByRole('menu');
-  await expect(menu).toBeVisible();
-
-  // Real keystrokes, not fill(): the defect is a cancelled keydown, so a
-  // direct value write would pass even while search is broken.
-  const search = menu.getByPlaceholder('Search workspaces...');
-  await search.pressSequentially('golf');
-
-  await expect(search).toHaveValue('golf');
-  await expect(menu.getByRole('menuitem').filter({ hasText: 'golf' })).toHaveCount(1);
-  await expect(menu.getByRole('menuitem').filter({ hasText: 'alpha' })).toHaveCount(0);
-});
-
-test('the Add workspace menu search is reachable by keyboard alone', async ({ page }) => {
-  const chat = await openEmptyCliChat(page);
-
-  await chat.getByRole('button', { name: 'Add workspace' }).click();
-  const menu = page.getByRole('menu');
-  const search = menu.getByPlaceholder('Search workspaces...');
-  await expect(search).toBeFocused();
-
-  await page.keyboard.type('delta');
-  await expect(search).toHaveValue('delta');
-  await expect(menu.getByRole('menuitem').filter({ hasText: 'delta' })).toHaveCount(1);
-});
-
 /**
- * The search field has to stay out of the popup's typeahead, but it must not
- * swallow the keys the menu itself needs. Escape is handled by a document-level
- * native listener in Base UI, so a blanket `stopPropagation` on the field's
- * keydown would stop the event before it ever gets there and leave the menu
- * stuck open. Tab is checked for the same reason.
+ * The terminal's "Pane options" menu has a search field of the same kind. It has to stay out of the popup's
+ * typeahead, but it must not swallow the keys the menu itself needs: Escape is handled by a document-level native
+ * listener in Base UI, so a blanket `stopPropagation` on the field's keydown would stop the event before it ever gets
+ * there and leave the menu stuck open.
  *
- * (Clicking outside is deliberately not asserted: the popup is modal, so the
- * rest of the page is inert and cannot receive the click. That is Base UI's
- * design, not behaviour this change affects.)
+ * (Clicking outside is deliberately not asserted: the popup is modal, so the rest of the page is inert and cannot
+ * receive the click. That is Base UI's design, not behaviour this change affects.)
  */
-test('Escape still closes the menu while the search field has focus', async ({ page }) => {
-  const chat = await openEmptyCliChat(page);
+test.describe('the search field in the terminal pane menu', () => {
+  test.beforeEach(async ({ page }) => {
+    // A running terminal, so the pane has its menu. Registered after the file's own, so these answer first.
+    await page.route('**/api/terminals/*/status', route => {
+      const id = route.request().url().split('/api/terminals/')[1]!.split('/')[0]!;
+      return route.fulfill({ json: { available: true, sessions: [{ id: `term-${id}`, workspace: id, target: 'shell', label: 'bash', cwd: `/tmp/${id}`, state: 'running' }], targets: [{ id: 'shell', name: 'Shell', available: true, reason: null }] } });
+    });
+    await page.routeWebSocket('**/ws/terminal', socket => {
+      socket.onMessage(message => {
+        const parsed = JSON.parse(String(message));
+        if (parsed.type !== 'attach') return;
+        socket.send(JSON.stringify({ type: 'ready', terminal: { id: parsed.id, workspace: parsed.workspace, target: 'shell', label: 'bash', cwd: `/tmp/${parsed.workspace}`, state: 'running' }, truncated: false }));
+        socket.send(JSON.stringify({ type: 'replayed' }));
+      });
+    });
+  });
 
-  await chat.getByRole('button', { name: 'Add workspace' }).click();
-  const menu = page.getByRole('menu');
-  await expect(menu).toBeVisible();
-  await menu.getByPlaceholder('Search workspaces...').pressSequentially('golf');
-  await expect(menu).toBeVisible();
+  async function openPaneMenu(page: import('@playwright/test').Page) {
+    await page.goto('/#/workspaces/alpha/chat');
+    const chat = page.getByRole('region', { name: 'CLI Chat' });
+    await expect(chat.getByTestId('terminal-state')).toHaveText('Running');
+    await chat.getByRole('button', { name: 'Pane options' }).click();
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    return { menu, search: menu.getByPlaceholder('Search output') };
+  }
 
-  await page.keyboard.press('Escape');
-  await expect(menu).toHaveCount(0);
-});
+  test('typing into it reaches the field', async ({ page }) => {
+    const { search } = await openPaneMenu(page);
 
-test('arrow keys still reach the menu while the search field has focus', async ({ page }) => {
-  const chat = await openEmptyCliChat(page);
+    // Real keystrokes, not fill(): the defect is a cancelled keydown, so a
+    // direct value write would pass even while search is broken.
+    await search.pressSequentially('golf');
 
-  await chat.getByRole('button', { name: 'Add workspace' }).click();
-  const menu = page.getByRole('menu');
-  const search = menu.getByPlaceholder('Search workspaces...');
-  await expect(search).toBeFocused();
+    await expect(search).toHaveValue('golf');
+  });
 
-  // Arrow navigation must not be swallowed: if it were, the popup would never
-  // highlight an item and the list could not be traversed from the keyboard.
-  await page.keyboard.press('ArrowDown');
-  await expect(menu.getByRole('menuitem').first()).toHaveAttribute('data-highlighted', '');
+  test('Escape still closes the menu while the field has focus', async ({ page }) => {
+    const { menu, search } = await openPaneMenu(page);
+    await search.pressSequentially('golf');
+    await expect(menu).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+  });
+
+  test('arrow keys still reach the menu while the field has focus', async ({ page }) => {
+    const { menu, search } = await openPaneMenu(page);
+    await search.focus();
+
+    // Arrow navigation must not be swallowed: if it were, the popup would never
+    // highlight an item and the list could not be traversed from the keyboard.
+    await page.keyboard.press('ArrowDown');
+    await expect(menu.locator('[role="menuitem"][data-highlighted]')).toHaveCount(1);
+  });
 });
 
 /**
@@ -169,7 +173,7 @@ test('arrow keys still reach the menu while the search field has focus', async (
  * Without care, focus falls to <body> and a keyboard or screen-reader user is
  * thrown back to the top of the page with no word about what happened.
  */
-test('opening a workspace from the empty state keeps keyboard focus on its tab', async ({ page }) => {
+test('opening a workspace from the empty state keeps keyboard focus on its session', async ({ page }) => {
   const chat = await openEmptyCliChat(page);
 
   await chat.getByRole('searchbox', { name: 'Search workspaces for CLI chat' }).pressSequentially('golf');
@@ -177,7 +181,7 @@ test('opening a workspace from the empty state keeps keyboard focus on its tab',
   await expect(workspaceButton(chat, 'golf')).toBeFocused();
   await page.keyboard.press('Enter');
 
-  await expect(chat.getByRole('tab', { name: 'Show golf in the left pane' })).toBeFocused();
+  await expect(sessionLink(page, 'golf')).toBeFocused();
 });
 
 test('filtering the picker is announced to screen readers', async ({ page }) => {
@@ -222,5 +226,25 @@ test.describe('with more workspaces than the first page shows', () => {
     await expect(group.getByRole('button')).toHaveCount(30);
     await expect(more).toHaveCount(0);
     await expect(workspaceButton(chat, 'ws-13')).toBeFocused();
+  });
+});
+
+test.describe('the sidebar list', () => {
+  const filter = (page: import('@playwright/test').Page) => page.locator('aside.context-sidebar').getByPlaceholder('Filter...');
+  const listed = (page: import('@playwright/test').Page, branch: string) => page.locator(`aside.context-sidebar a[href="#/workspaces/${branch}"]`);
+
+  test('lists every workspace, and its filter narrows the list as you type', async ({ page }) => {
+    await page.goto('/#/overview');
+    for (const name of names) await expect(listed(page, name)).toBeVisible();
+
+    await filter(page).pressSequentially('golf');
+    await expect(listed(page, 'golf')).toBeVisible();
+    await expect(listed(page, 'alpha')).toHaveCount(0);
+  });
+
+  test('a filter that matches nothing says so', async ({ page }) => {
+    await page.goto('/#/overview');
+    await filter(page).pressSequentially('zzzz');
+    await expect(page.locator('aside.context-sidebar').getByText('No workspaces match')).toBeVisible();
   });
 });

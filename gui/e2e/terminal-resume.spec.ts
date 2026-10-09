@@ -1,4 +1,9 @@
+import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
+
+/** An open chat is a session in the sidebar; the one on screen is the current page. */
+const sidebarSession = (page: Page, branch: string) => page.locator(`aside.context-sidebar [data-sidebar-session="${branch}"]`);
+const openSessions = (page: Page) => page.locator('aside.context-sidebar [data-sidebar-session]');
 
 const feature = { id: 'feature-x', branchName: 'feature-x', description: 'Harness resume', repos: [], assistants: ['antigravity', 'codex'], workspacePath: 'C:/ws/feature-x', createdAt: '2026-09-20T00:00:00Z' };
 const harnesses = ['codex', 'claude', 'antigravity', 'copilot', 'pi'];
@@ -27,14 +32,14 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/terminals/feature-x/create', route => route.fulfill({ status: 400, json: { error: 'Test launch intercepted' } }));
 });
 
-test('overview and sidebar reopen the existing workspace CLI tab', async ({ page }) => {
+test('overview and sidebar reopen the existing workspace CLI session', async ({ page }) => {
   await page.goto('/#/overview');
   const card = page.getByRole('article');
   await expect(card.getByRole('button', { name: 'Open codex saved conversation with Codex in CLI chat' })).toBeVisible();
   await card.getByRole('button', { name: 'View all CLI sessions for feature-x' }).click();
   const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
   await expect(chat).toBeVisible();
-  await expect(chat.getByRole('tab', { name: 'Show feature-x in the left pane' })).toHaveCount(1);
+  await expect(sidebarSession(page, 'feature-x')).toHaveCount(1);
   // The tools and the saved conversations are on one screen.
   await expect(chat.getByRole('group', { name: 'CLI tools' })).toBeVisible();
   await expect(chat.getByRole('region', { name: 'Continue a conversation' })).toBeVisible();
@@ -44,7 +49,7 @@ test('overview and sidebar reopen the existing workspace CLI tab', async ({ page
 
   await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for feature-x' }).click();
   await expect(chat).toBeVisible();
-  await expect(chat.getByRole('tab', { name: 'Show feature-x in the left pane' })).toHaveCount(1);
+  await expect(sidebarSession(page, 'feature-x')).toHaveCount(1);
   await expect(chat.getByRole('tablist', { name: 'CLI sessions' }).getByRole('tab')).toHaveCount(1);
 });
 
@@ -167,17 +172,17 @@ test('selecting an already running CLI session reuses its terminal', async ({ pa
     await expect(chat).toBeVisible();
     await expect(attached).toBeVisible();
     expect(launches).toBe(1);
-    await expect(chat.getByRole('tab', { name: 'Show feature-x in the left pane' })).toHaveCount(1);
+    await expect(sidebarSession(page, 'feature-x')).toHaveCount(1);
   } finally {
     releaseCreate();
   }
 });
 
-test.describe('workspace tab selection', () => {
+test.describe('workspace session selection', () => {
   const other = { ...feature, id: 'feature-y', branchName: 'feature-y', description: 'Other work', workspacePath: 'C:/ws/feature-y' };
   test.use({ workspacesData: [[feature, other], { scope: 'test' }] });
 
-  test('resume action focuses an existing tab without resetting it', async ({ page }) => {
+  test('resume action focuses an existing session without resetting it', async ({ page }) => {
     await page.goto('/#/overview');
     const chat = page.getByRole('region', { name: 'CLI Chat', exact: true });
     await page.getByRole('article').filter({ hasText: 'Harness resume' }).getByRole('button', { name: 'View all CLI sessions for feature-x' }).click();
@@ -188,12 +193,12 @@ test.describe('workspace tab selection', () => {
     // The sidebar lists every workspace on pages outside a workspace; inside one it shows that workspace's worktrees.
     await page.goto('/#/overview');
     await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for feature-y' }).click();
-    await expect(chat.getByRole('tab', { name: 'Show feature-y in the left pane' })).toHaveAttribute('aria-selected', 'true');
+    await expect(sidebarSession(page, 'feature-y')).toHaveAttribute('aria-current', 'page');
 
     await page.goto('/#/overview');
     await page.locator('aside.context-sidebar').getByRole('button', { name: 'Resume CLI chat for feature-x' }).click();
-    await expect(chat.getByRole('tab', { name: 'Show feature-x in the left pane' })).toHaveAttribute('aria-selected', 'true');
-    await expect(chat.getByRole('tablist', { name: 'Open chats' }).getByRole('tab')).toHaveCount(2);
+    await expect(sidebarSession(page, 'feature-x')).toHaveAttribute('aria-current', 'page');
+    await expect(openSessions(page)).toHaveCount(2);
     await expect(chat.getByRole('tablist', { name: 'CLI sessions' }).getByRole('tab')).toHaveCount(2);
   });
 });

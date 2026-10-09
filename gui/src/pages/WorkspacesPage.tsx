@@ -27,6 +27,7 @@ import {
   X,
   PanelLeftClose,
   PanelLeftOpen,
+  Columns2,
 } from 'lucide-react';
 import { VscVscode, VscVscodeInsiders } from 'react-icons/vsc';
 import { AntigravityIcon } from '../components/icons/AntigravityIcon.js';
@@ -189,7 +190,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
     if (selectedBranch) perfMark('cs:ws-header', { id: selectedBranch, tab: subTab });
   }, [selectedBranch, subTab]);
   const selectedMode = selected?.mode ?? 'worktree';
-  const { open: openChat } = useFloatingChat();
+  const { open: openChat, activeTab, splitTab, setSplitTab } = useFloatingChat();
   // The chat is the centre of the screen. Other parts open as a panel beside it when there is room, and by themselves when not.
   const layout = useChatLayout();
   const [body, setBody] = useState<HTMLDivElement | null>(null);
@@ -686,6 +687,49 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
 
               <IconButton size="sm" label="Copy Context" icon={<Copy />} onClick={() => handleCopyPrompt(selected)} className="text-muted-foreground hover:text-foreground" />
 
+              {/* A second workspace docks beside the chat on screen, so only that workspace offers it. */}
+              {!archived && activeTab === selected.branchName && (
+                <Menu>
+                  <MenuTrigger
+                    aria-label="Dock a second workspace"
+                    className={cn(
+                      'grid size-7 place-items-center rounded-md transition-colors cursor-pointer',
+                      splitTab ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                    )}
+                    title="Show a second workspace beside this one"
+                  >
+                    <Columns2 size={13} />
+                  </MenuTrigger>
+                  <MenuPopup align="end" className="max-h-72 w-56 overflow-y-auto p-1.5">
+                    {splitTab && (
+                      <MenuItem onClick={() => setSplitTab(null)} className="text-xs">
+                        Close docked workspace
+                      </MenuItem>
+                    )}
+                    {workspaces
+                      .filter((workspace) => workspace.branchName !== selected.branchName)
+                      .map((workspace) => (
+                        <MenuItem
+                          key={workspace.branchName}
+                          onClick={() => setSplitTab(workspace.branchName)}
+                          className="flex items-center gap-2 text-xs"
+                        >
+                          <FolderGit2 className="size-3" />
+                          <span className="truncate">{workspace.name || workspace.branchName}</span>
+                          {splitTab === workspace.branchName && (
+                            <span className="ml-auto text-primary font-medium">Docked</span>
+                          )}
+                        </MenuItem>
+                      ))}
+                    {workspaces.length < 2 && (
+                      <p className="p-2 text-xs text-muted-foreground">
+                        Open another workspace to dock it here.
+                      </p>
+                    )}
+                  </MenuPopup>
+                </Menu>
+              )}
+
               <Menu>
                 <MenuTrigger aria-label="Workspace actions" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors cursor-pointer">
                   <MoreVertical size={13} />
@@ -720,7 +764,7 @@ export function WorkspacesPage(props: WorkspacesPageProps) {
           </>}
         />
         {/* Tab Navigation & Content Container */}
-        <div ref={setBody} className="flex min-h-0 flex-1">
+        <div ref={setBody} className="flex min-h-0 flex-1 pb-14 md:pb-0">
           {showChat && (
             <div className="h-full min-h-0 min-w-0" style={{ flex: showPanel ? `0 0 ${layout.percent}%` : '1 1 100%' }}>
               {/* The chat is not rendered here: it lives above the router and sits over this box, so it stays alive. */}
