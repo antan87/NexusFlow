@@ -1,5 +1,9 @@
 import { test, expect } from '@playwright/test';
 
+// A real shell is a process: starting, ending or exiting it takes longer than the default 5 s on a loaded runner (Windows ConPTY
+// especially), and a slow start says nothing about the code under test.
+const SHELL_STATE = { timeout: 20_000 };
+
 test('one real shell survives window changes and reload, then stops explicitly', async ({ page }) => {
   test.setTimeout(90_000);
   let launches = 0;
@@ -25,7 +29,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   const pane = page.getByTestId('terminal-pane').filter({ visible: true }).first();
   const sessionTabs = chat.getByRole('tablist', { name: 'CLI sessions' }).getByRole('tab');
   await pane.getByRole('group', { name: 'CLI tools' }).getByRole('button', { name: 'Start Shell', exact: true }).click();
-  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running', SHELL_STATE);
   const openPaneOptions = () => pane.getByRole('button', { name: 'Pane options' }).click();
   // Code and Docs open on the workspace rail, beside the chat. Code has a toolbar button in the chat; Docs answers to
   // Ctrl+Shift+D from the terminal. Each opens and closes the same way.
@@ -95,7 +99,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   await expect(pane).toBeVisible();
   await toggleInspector('Code');
   await page.reload();
-  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running', SHELL_STATE);
   // Taken over after the reload, once: one tab, and no start screen.
   await expect(sessionTabs).toHaveCount(1);
   await expect(pane.getByRole('region', { name: 'Start a CLI session' })).toHaveCount(0);
@@ -107,7 +111,7 @@ test('one real shell survives window changes and reload, then stops explicitly',
   expect(launches).toBe(1);
   page.once('dialog', dialog => dialog.accept());
   await pane.getByRole('button', { name: 'End', exact: true }).click();
-  await expect(pane.getByTestId('terminal-state')).toHaveText('Ended');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Ended', SHELL_STATE);
   await expect(pane.getByRole('button', { name: 'End', exact: true })).toHaveCount(0);
 });
 
@@ -136,7 +140,7 @@ test('two real shells work in one workspace at once, side by side, and both come
   const readable = async (index: number) => { await panes.nth(index).getByRole('button', { name: 'Pane options' }).click(); await page.getByRole('menuitem', { name: /Screen reader mode/ }).click(); };
 
   await panes.first().getByRole('group', { name: 'CLI tools' }).getByRole('button', { name: 'Start Shell', exact: true }).click();
-  await expect(panes.first().getByTestId('terminal-state')).toHaveText('Running');
+  await expect(panes.first().getByTestId('terminal-state')).toHaveText('Running', SHELL_STATE);
   await readable(0);
   await run(0, process.platform === 'win32' ? "$env:CS_SIDE='left'; Write-Output 'CS_LEFT_READY'" : 'export CS_SIDE=left; echo CS_LEFT_READY');
   await expect(screenOf(0)).toContainText('CS_LEFT_READY');
@@ -147,7 +151,7 @@ test('two real shells work in one workspace at once, side by side, and both come
   await expect(sessionTabs).toHaveCount(2);
   await expect(sessionTabs.nth(1)).toHaveAccessibleName(/^Shell 2, /);
   await expect(sessionTabs.nth(1)).toHaveAttribute('aria-selected', 'true');
-  await expect(panes.first().getByTestId('terminal-state')).toHaveText('Running');
+  await expect(panes.first().getByTestId('terminal-state')).toHaveText('Running', SHELL_STATE);
   await readable(0);
   // Its own shell: the first one's variable is not set here.
   await run(0, process.platform === 'win32' ? "Write-Output ('CS_SIDE=' + $env:CS_SIDE + '.')" : 'echo CS_SIDE=${CS_SIDE}.');
@@ -168,9 +172,9 @@ test('two real shells work in one workspace at once, side by side, and both come
   // A reload brings both back, each in one tab, without starting anything.
   await page.reload();
   await expect(sessionTabs).toHaveCount(2);
-  await expect(panes.first().getByTestId('terminal-state')).toHaveText('Running');
+  await expect(panes.first().getByTestId('terminal-state')).toHaveText('Running', SHELL_STATE);
   await sessionTabs.nth(1).click();
-  await expect(panes.first().getByTestId('terminal-state')).toHaveText('Running');
+  await expect(panes.first().getByTestId('terminal-state')).toHaveText('Running', SHELL_STATE);
   expect(launches).toBe(2);
 
   // Closing a tab whose shell runs asks first, then ends that shell only.
@@ -178,7 +182,7 @@ test('two real shells work in one workspace at once, side by side, and both come
   await sessionTabs.nth(1).focus();
   await page.keyboard.press('Delete');
   await expect(sessionTabs).toHaveCount(1);
-  await expect(panes.first().getByTestId('terminal-state')).toHaveText('Running');
+  await expect(panes.first().getByTestId('terminal-state')).toHaveText('Running', SHELL_STATE);
   await readable(0);
   await run(0, process.platform === 'win32' ? "Write-Output ('CS_LAST_' + $env:CS_SIDE)" : 'echo CS_LAST_$CS_SIDE');
   await expect(screenOf(0)).toContainText('CS_LAST_left');
@@ -191,11 +195,11 @@ test('a shell that quits on its own is labeled exited', async ({ page }) => {
   await page.goto('/#/workspaces/terminal-test/chat');
   const pane = page.getByTestId('terminal-pane').filter({ visible: true }).first();
   await pane.getByRole('group', { name: 'CLI tools' }).getByRole('button', { name: 'Start Shell', exact: true }).click();
-  await expect(pane.getByTestId('terminal-state')).toHaveText('Running');
+  await expect(pane.getByTestId('terminal-state')).toHaveText('Running', SHELL_STATE);
   await pane.locator('.xterm-helper-textarea').focus();
   await page.keyboard.type('exit 3');
   await page.keyboard.press('Enter');
-  await expect(pane.getByTestId('terminal-state')).toContainText('Exited');
+  await expect(pane.getByTestId('terminal-state')).toContainText('Exited', SHELL_STATE);
   await expect(pane.getByRole('button', { name: 'End', exact: true })).toHaveCount(0);
 });
 
