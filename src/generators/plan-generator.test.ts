@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { generateImplementationPlan } from './plan-generator.js';
 import { loadWorkspaceState, saveWorkspaceState } from '../core/workspace-state.js';
 import { updateWorkGuidance } from '../core/work-guidance.js';
+import { PLANNING_NOTES_FILE, ensurePlanningNotes } from '../core/planning-notes.js';
 import type { Feature, ProjectAnalysis, RepoInfo, WorkspaceContext } from '../types.js';
 
 import { PRIMARY_PLAN_FILE, BRAND_NAME, CLI_NAME } from '../core/constants.js';
@@ -110,8 +111,12 @@ describe('generateImplementationPlan', () => {
       expect(content).toContain('Measure latency');
       expect(content).toContain('Depends on: Measure latency');
       expect(content).toContain('performance/baseline');
-      expect(content).not.toContain('in progress');
       expect(content).not.toContain('Recommended Lifecycle Phases');
+      // The exported definitions carry no progress. Only the current-work block, which names the one
+      // active milestone, says where it stands (as it already does for a single repo).
+      const [definitions, currentWork] = content.split('## Current work and next action');
+      expect(definitions).not.toContain('in progress');
+      expect(currentWork).toContain('Milestone:** Measure latency (in progress)');
     });
 
     it('says so once instead of five times', async () => {
@@ -189,10 +194,21 @@ describe('generateImplementationPlan', () => {
       expect(content).not.toContain('All saved milestones are complete');
     });
 
-    it('stays short, since it has one fact to convey', async () => {
+    it('stays short: the dependency part is one sentence and the rest is the current work', async () => {
       const content = await planFor(...unrelated());
 
-      expect(content.length).toBeLessThan(600);
+      // Was 600, when a multi-repo plan said nothing but the build order. The current-work block now
+      // makes up most of the file; this still stops the five-fold repetition coming back.
+      expect(content.length).toBeLessThan(2200);
+      expect(content.split('No package dependencies were detected').length - 1).toBe(1);
+    });
+
+    it('shows the objective and that no delivery plan exists, even with several repos', async () => {
+      const content = await planFor(...unrelated());
+
+      expect(content).toContain('## Current work and next action');
+      expect(content).toContain('add a discount code to checkout');
+      expect(content).toContain('Feature delivery plan not yet defined');
     });
 
     it('says how to get a real plan', async () => {
@@ -241,6 +257,81 @@ describe('generateImplementationPlan', () => {
       const content = await planFor(...related());
 
       expect(content).not.toContain('Contributing Projects');
+    });
+  });
+
+  describe('the current work comes before the build order, whatever the number of repos', () => {
+    const authoredNotes = [
+      '# Delivery plan and open questions', '',
+      '## Outcomes and release order', '',
+      '| Milestone ID | Outcome |', '| --- | --- |', '| m1 | Ship the discount code |', '',
+    ].join('\n');
+
+    it('leads with the objective, then labels the dependency order as supporting information', async () => {
+      const content = await planFor(...related());
+
+      const work = content.indexOf('## Current work and next action');
+      expect(work).toBeGreaterThan(-1);
+      expect(work).toBeLessThan(content.indexOf('## Dependency Diagram'));
+      expect(work).toBeLessThan(content.indexOf('## Package dependency order'));
+      expect(content).toContain('add a discount code to checkout');
+      expect(content).toContain('not a feature delivery plan');
+      expect(content).toContain('contextspace-assignment.md');
+      // The dependency material itself is unchanged.
+      expect(content).toContain('Suggested Implementation Order');
+    });
+
+    it('says plainly that no delivery plan exists when nothing has been written', async () => {
+      const content = await planFor(...related());
+
+      expect(content).toContain('Feature delivery plan not yet defined');
+      expect(content).toContain('Example first milestone draft');
+    });
+
+    it('treats the untouched planning-notes template as no plan', async () => {
+      await ensurePlanningNotes(dir, 'feat');
+      const content = await planFor(...related());
+
+      expect(content).toContain('Feature delivery plan not yet defined');
+    });
+
+    it('points at authored planning notes instead of claiming no plan exists', async () => {
+      await fs.writeFile(path.join(dir, PLANNING_NOTES_FILE), authoredNotes);
+      const content = await planFor(...related());
+
+      expect(content).toContain(`authored planning notes exist in ${PLANNING_NOTES_FILE}`);
+      expect(content).toContain('proposals until the owner approves them');
+      expect(content).not.toContain('not yet defined');
+      expect(content).not.toContain('Example first milestone draft');
+    });
+
+    it('leaves the authored planning notes exactly as they were', async () => {
+      await fs.writeFile(path.join(dir, PLANNING_NOTES_FILE), authoredNotes);
+      await planFor(...related());
+
+      expect(await fs.readFile(path.join(dir, PLANNING_NOTES_FILE), 'utf-8')).toBe(authoredNotes);
+    });
+
+    it('shows the saved milestone instead of the "not defined" line', async () => {
+      await saveWorkspaceState({ workspacePath: dir, repos: {}, updatedAt: '', lifecycle: {
+        workspaceId: 'feat', flowType: 'feature', currentStepId: 'code', updatedAt: '',
+        steps: [{ id: 'code', title: 'Add the discount field', status: 'pending' }],
+      } });
+      const content = await planFor(...related());
+
+      expect(content).toContain('Milestone:** Add the discount field (pending)');
+      expect(content).not.toContain('not yet defined');
+    });
+
+    it('uses the saved assignment for a workspace whose repos depend on each other', async () => {
+      await fs.writeFile(path.join(dir, 'contextspace.json'), JSON.stringify({ id: 'feat', branchName: 'feat', description: 'add a discount code to checkout', repos: [], assistants: [] }));
+      await updateWorkGuidance(dir, { revision: 0, workType: 'feature', size: 'standard', assignment: {
+        stage: 'investigate', objective: 'Find where totals are computed', expectedOutput: 'A short design', stopCondition: 'Before changing code',
+      } });
+      const content = await planFor(...related());
+
+      expect(content).toContain('Assignment (investigate):** Find where totals are computed');
+      expect(content).toContain('Stop when:** Before changing code');
     });
   });
 
