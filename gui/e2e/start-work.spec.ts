@@ -346,6 +346,10 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     const preview = page.getByRole('region', { name: 'What this adds to the workspace' });
     await expect(preview).toContainText('1 skill · 1 file');
     await expect(preview.getByText('.agents/skills/work-lifecycle/SKILL.md')).toBeHidden();
+    // The region the toggle controls exists even while collapsed, so aria-controls never dangles.
+    const toggle = preview.getByRole('button', { name: /What this adds to the workspace/ });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('#' + (await toggle.getAttribute('aria-controls'))!)).toBeAttached();
     // Before anything is installed, the user can still see each file and where it goes.
     await preview.getByRole('button', { name: /What this adds to the workspace/ }).click();
     await expect(preview).toContainText('Work lifecycle');
@@ -563,8 +567,12 @@ test.describe('NexusFlow E2E GUI Tests', () => {
     await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { name: 'New workspace' })).toBeVisible();
     expect(payload).toBeNull();
+    // It says what is missing instead of doing nothing, and stops saying it once a repository is chosen.
+    const needsRepo = page.getByRole('alert').filter({ hasText: 'Choose a repository first' });
+    await expect(needsRepo).toBeVisible();
 
     await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
+    await expect(needsRepo).toHaveCount(0);
     await name.focus();
     await page.keyboard.press('Enter');
 
@@ -697,6 +705,39 @@ test.describe('NexusFlow E2E GUI Tests', () => {
       await expect(picker.getByRole('radio', { checked: true })).toHaveCount(0);
     });
 
+    test('keeps keyboard focus in the picker when "Choose later" clears the pick', async ({ page }) => {
+      await page.goto('/#/new');
+      const picker = pickerOf(page);
+      await picker.getByRole('radio', { name: 'Codex', exact: true }).click();
+      const later = page.getByRole('button', { name: 'Choose later' });
+      await later.focus();
+      await page.keyboard.press('Enter');
+      // The button goes away with the pick; focus must not fall back to the top of the page. It stays on the
+      // card that was just cleared, so the arrow keys carry on from where the choice was.
+      await expect(later).toHaveCount(0);
+      await expect(picker.getByRole('radio', { name: 'Codex', exact: true })).toBeFocused();
+      await expect(picker.getByRole('radio', { checked: true })).toHaveCount(0);
+    });
+
+    test('leaves no preferred tool behind for a workspace that was not created', async ({ page }) => {
+      await mockFailedCreationStream(page);
+      await page.route('**/api/workspace', async (route) => {
+        await route.fulfill({ json: { success: true, jobId: 'never-created' } });
+      });
+      await page.goto('/#/new');
+      await page.getByRole('checkbox', { name: 'nexus-frontend' }).click();
+      await page.getByLabel('Workspace name').fill('Never created');
+      await pickerOf(page).getByRole('radio', { name: 'Codex', exact: true }).click();
+      await page.getByRole('button', { name: 'Create workspace' }).click();
+
+      await expect(page.getByRole('heading', { name: 'Unable to reconnect to workspace setup' })).toBeVisible();
+      const preferred = await page.evaluate(() => {
+        const saved = JSON.parse(localStorage.getItem('contextspace_floating_chat_state_v1') ?? '{}');
+        return saved.harnesses?.['never-created'] ?? null;
+      });
+      expect(preferred).toBeNull();
+    });
+
     test('lists the chosen tool under Advanced setup as always included', async ({ page }) => {
       await page.goto('/#/new');
       await pickerOf(page).getByRole('radio', { name: 'Claude Code', exact: true }).click();
@@ -708,6 +749,31 @@ test.describe('NexusFlow E2E GUI Tests', () => {
       await expect(chosen).toBeDisabled();
       await expect(instructions.getByRole('checkbox', { name: /OpenAI Codex/ })).toBeEnabled();
     });
+  });
+
+  test('suggests a strategy from the workspace name when there is no description', async ({ page }) => {
+    let suggestBody: any = null;
+    await page.route('**/api/workspace/suggest-workflow', async (route) => {
+      suggestBody = route.request().postDataJSON();
+      await route.fulfill({ json: { success: true, difficulty: 'simple', suggestedWorkflowId: 'plan-implement-review', customInstructions: '# Plan' } });
+    });
+    await page.goto('/#/new');
+    await page.getByRole('button', { name: 'Advanced setup' }).click();
+    await page.getByRole('button', { name: 'Agent collaboration' }).click();
+    const suggest = page.getByRole('button', { name: 'Suggest with AI' });
+
+    // With neither a name nor a task there is nothing to go on, and the message says how to fix it.
+    await suggest.click();
+    await expect(page.getByRole('alert').filter({ hasText: 'Name the workspace or describe the task first' })).toBeVisible();
+    expect(suggestBody).toBeNull();
+
+    // The name is enough, and a description still wins when there is one.
+    await page.getByLabel('Workspace name').fill('Fix invoice rounding');
+    await suggest.click();
+    await expect.poll(() => suggestBody?.description).toBe('Fix invoice rounding');
+    await page.getByLabel('What do you want to do?').fill('Round every invoice line to two decimals');
+    await suggest.click();
+    await expect.poll(() => suggestBody?.description).toBe('Round every invoice line to two decimals');
   });
 
   test('should save settings changes', async ({ page }) => {

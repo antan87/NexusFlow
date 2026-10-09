@@ -68,8 +68,8 @@ export function ResourcePreview({ skills, agents, assistants, tagCount }: { skil
         </button>
       </h3>
       {preview.isError && <p role="alert" className="px-3 pb-2 text-xs text-destructive">{preview.error instanceof Error ? preview.error.message : 'The preview is unavailable.'} Creating the workspace still checks every selection.</p>}
-      {open && (
-        <div id={detailsId} className="max-h-64 overflow-y-auto border-t border-border px-3 py-2">
+      <div id={detailsId} hidden={!open} className="max-h-64 overflow-y-auto border-t border-border px-3 py-2">
+        {open && (<>
           {tagCount > 0 && <p className="mb-2 text-xs text-muted-foreground">Category tags can add more skills when the workspace is created.</p>}
           {preview.data && (
             <ul className="space-y-2">
@@ -85,8 +85,8 @@ export function ResourcePreview({ skills, agents, assistants, tagCount }: { skil
               ))}
             </ul>
           )}
-        </div>
-      )}
+        </>)}
+      </div>
     </section>
   );
 }

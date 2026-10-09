@@ -5,6 +5,8 @@ import {
   handleWorkspaceCreationCompletion,
   withStartHarness,
   resolveStartHarness,
+  resolveWorktreeBranch,
+  taskTextForSuggestions,
 } from './createWorkspaceFlow.js';
 
 describe('suggestedBranchName', () => {
@@ -181,9 +183,78 @@ describe('handleWorkspaceCreationCompletion', () => {
       onNavigate,
     });
 
-    expect(result).toBe('feat/fast-ws');
+    // Inspecting a finished job acts on nothing, so nothing is marked as handled.
+    expect(result).toBeNull();
     expect(onOpenCli).not.toHaveBeenCalled();
     expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it('still opens a workspace that was only inspected earlier in the same page', () => {
+    const onOpenCli = vi.fn();
+    const onNavigate = vi.fn();
+    const inspected = handleWorkspaceCreationCompletion({
+      status: 'completed', workspaceId: 'feat/fast-ws', lastOpenedWorkspaceId: null, autoNavigate: false, onOpenCli, onNavigate,
+    });
+    const created = handleWorkspaceCreationCompletion({
+      status: 'completed', workspaceId: 'feat/fast-ws', lastOpenedWorkspaceId: inspected, onOpenCli, onNavigate,
+    });
+    expect(created).toBe('feat/fast-ws');
+    expect(onNavigate).toHaveBeenCalledWith('/workspaces/feat%2Ffast-ws');
+  });
+
+  it('makes the chosen harness the preferred one before opening the dock, once the workspace exists', () => {
+    const calls: string[] = [];
+    handleWorkspaceCreationCompletion({
+      status: 'completed',
+      workspaceId: 'fast-ws',
+      lastOpenedWorkspaceId: null,
+      startHarness: 'codex',
+      onChooseHarness: (id, harness) => calls.push(`choose ${id} ${harness}`),
+      onOpenCli: (id) => calls.push(`open ${id}`),
+      onNavigate: (path) => calls.push(`go ${path}`),
+    });
+    expect(calls).toEqual(['choose fast-ws codex', 'open fast-ws', 'go /workspaces/fast-ws']);
+  });
+
+  it('chooses no harness when none was picked, when the job failed, or when only inspecting', () => {
+    const onChooseHarness = vi.fn();
+    const base = { workspaceId: 'fast-ws', lastOpenedWorkspaceId: null, onChooseHarness, onOpenCli: vi.fn(), onNavigate: vi.fn() };
+    handleWorkspaceCreationCompletion({ ...base, status: 'completed', startHarness: '' });
+    handleWorkspaceCreationCompletion({ ...base, status: 'failed', startHarness: 'codex' });
+    handleWorkspaceCreationCompletion({ ...base, status: 'running', startHarness: 'codex' });
+    handleWorkspaceCreationCompletion({ ...base, status: 'completed', startHarness: 'codex', autoNavigate: false });
+    expect(onChooseHarness).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveWorktreeBranch', () => {
+  it('uses the branch that was typed, trimmed', () => {
+    expect(resolveWorktreeBranch('  custom/branch ', 'Anything')).toBe('custom/branch');
+  });
+
+  it('derives one from the workspace name when none was typed', () => {
+    expect(resolveWorktreeBranch('', 'Fast Workspace')).toBe('feature/fast-workspace');
+    expect(resolveWorktreeBranch(undefined, 'Fast Workspace')).toBe('feature/fast-workspace');
+    expect(resolveWorktreeBranch('   ', 'Fast Workspace')).toBe('feature/fast-workspace');
+  });
+
+  it('is empty when neither gives a usable branch', () => {
+    expect(resolveWorktreeBranch('', '###')).toBe('');
+  });
+});
+
+describe('taskTextForSuggestions', () => {
+  it('prefers the task description', () => {
+    expect(taskTextForSuggestions(' Fix invoice rounding ', 'Invoices')).toBe('Fix invoice rounding');
+  });
+
+  it('falls back to the workspace name when there is no description', () => {
+    expect(taskTextForSuggestions('', ' Invoices ')).toBe('Invoices');
+    expect(taskTextForSuggestions('   ', 'Invoices')).toBe('Invoices');
+  });
+
+  it('is empty when there is neither', () => {
+    expect(taskTextForSuggestions('', '  ')).toBe('');
   });
 });
 

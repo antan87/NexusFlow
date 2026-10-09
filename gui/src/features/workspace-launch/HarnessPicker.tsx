@@ -37,7 +37,11 @@ export function HarnessPicker({ harnesses, value, onChange, loading }: {
         {value && (
           <button
             type="button"
-            onClick={() => onChange('')}
+            onClick={() => {
+              onChange('');
+              // This button goes away once nothing is chosen: keep keyboard focus in the picker rather than dropping it.
+              if (tabStop) document.getElementById(`harness-${tabStop}`)?.focus();
+            }}
             className="rounded text-xs text-muted-foreground outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
           >
             Choose later

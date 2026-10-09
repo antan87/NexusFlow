@@ -55,7 +55,9 @@ import {
   handleWorkspaceCreationCompletion,
   isWorkspaceFormValid,
   resolveStartHarness,
+  resolveWorktreeBranch,
   suggestedBranchName,
+  taskTextForSuggestions,
   withStartHarness,
 } from '../features/workspace-launch/createWorkspaceFlow.js';
 import { HarnessPicker } from '../features/workspace-launch/HarnessPicker.js';
@@ -168,17 +170,6 @@ export function StartWorkPage() {
   const [submittedHere, setSubmittedHere] = useState(false);
   const isDirectReplay = Boolean(creationJobId) && !submittedHere && searchParams.get('from') !== 'chat';
 
-  useEffect(() => {
-    openedWorkspace.current = handleWorkspaceCreationCompletion({
-      status: progress.status,
-      workspaceId: progress.workspaceId,
-      lastOpenedWorkspaceId: openedWorkspace.current,
-      autoNavigate: !isDirectReplay,
-      onOpenCli: (id) => floatingChatStore.openCli(id),
-      onNavigate: (url) => navigate(url),
-    });
-  }, [progress.status, progress.workspaceId, navigate, isDirectReplay]);
-
   const [projectId, setProjectId] = useState<string>(searchParams.get('project') ?? AD_HOC);
   const [workType, setWorkType] = useState<WorkGuidance['workType']>('feature');
   const [mode, setMode] = useState<WorkspaceMode>('in-place');
@@ -198,6 +189,19 @@ export function StartWorkPage() {
     installed: (aiDetect.data ?? []).filter((item) => item.detected).map((item) => item.name),
   });
   const instructionTargets = withStartHarness(assistants, startHarness);
+
+  useEffect(() => {
+    openedWorkspace.current = handleWorkspaceCreationCompletion({
+      status: progress.status,
+      workspaceId: progress.workspaceId,
+      lastOpenedWorkspaceId: openedWorkspace.current,
+      autoNavigate: !isDirectReplay,
+      startHarness,
+      onChooseHarness: (id, harness) => floatingChatStore.setHarness(id, harness),
+      onOpenCli: (id) => floatingChatStore.openCli(id),
+      onNavigate: (url) => navigate(url),
+    });
+  }, [progress.status, progress.workspaceId, navigate, isDirectReplay, startHarness]);
   const [enabledSkills, setEnabledSkills] = useState<string[]>([]);
   const [enabledAgents, setEnabledAgents] = useState<string[]>([]);
   const [strategyId, setStrategyId] = useState<string>('');
@@ -210,6 +214,8 @@ export function StartWorkPage() {
   const [branchOverrides, setBranchOverrides] = useState<Record<string, string>>({});
   const [overridesOpen, setOverridesOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Enter in the name field was pressed before any repository was chosen: say what is missing instead of doing nothing.
+  const [askedWithoutRepo, setAskedWithoutRepo] = useState(false);
 
   // Tag creation modal state
   const [showCreateTagModal, setShowCreateTagModal] = useState(false);
@@ -250,8 +256,9 @@ export function StartWorkPage() {
 
   /** Keyword-based auto-suggestions from what the developer types in description */
   const suggestedMatches = useMemo(() => {
-    if (!description.trim() || description.trim().length < 3) return [];
-    const text = description.toLowerCase();
+    const task = taskTextForSuggestions(description, workspaceName);
+    if (task.length < 3) return [];
+    const text = task.toLowerCase();
     const suggestions: Array<{ id: string; title: string; type: 'tag' | 'skill' }> = [];
 
     // Match tags
@@ -273,7 +280,7 @@ export function StartWorkPage() {
     }
 
     return suggestions.slice(0, 6);
-  }, [description, domainPacksQuery.data, skillsQuery.data, selectedTags, enabledSkills]);
+  }, [description, workspaceName, domainPacksQuery.data, skillsQuery.data, selectedTags, enabledSkills]);
 
   useEffect(() => {
     if (creationJobId) {
@@ -377,7 +384,7 @@ export function StartWorkPage() {
   };
 
   const inPlace = mode === 'in-place';
-  const worktreeBranch = branchName.trim() || suggestedBranchName(workspaceName);
+  const worktreeBranch = resolveWorktreeBranch(branchName, workspaceName);
   const formValid = isWorkspaceFormValid({
     workspaceName,
     mode,
@@ -393,8 +400,9 @@ export function StartWorkPage() {
   };
 
   const suggestStrategy = async () => {
-    if (!description.trim()) {
-      setSubmitError('Describe what you are building first — the suggestion is based on it.');
+    const task = taskTextForSuggestions(description, workspaceName);
+    if (!task) {
+      setSubmitError('Name the workspace or describe the task first — the suggestion is based on it.');
       return;
     }
     setSubmitError(null);
@@ -407,7 +415,7 @@ export function StartWorkPage() {
         customInstructions: string;
       }>('/api/workspace/suggest-workflow', {
         method: 'POST',
-        body: JSON.stringify({ description, repos: selectedRepos }),
+        body: JSON.stringify({ description: task, repos: selectedRepos }),
       });
       setStrategyId(data.suggestedWorkflowId);
       setCustomInstructions(data.customInstructions);
@@ -447,8 +455,6 @@ export function StartWorkPage() {
     };
     try {
       const { jobId } = await createWorkspace.mutateAsync(payload);
-      // The job id is the workspace id. Setting the preference only puts the tool first on the start screen.
-      if (startHarness) floatingChatStore.setHarness(jobId, startHarness);
       start(jobId);
       setSearchParams((params) => {
         const next = new URLSearchParams(params);
@@ -644,9 +650,10 @@ export function StartWorkPage() {
               onChange={(e) => setWorkspaceName(e.target.value)}
               placeholder="e.g. Simpler workspace setup"
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.nativeEvent.isComposing && formValid && !createWorkspace.isPending) {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing && !createWorkspace.isPending) {
                   e.preventDefault();
-                  submit();
+                  if (formValid) submit();
+                  else if (selectedRepos.length === 0) setAskedWithoutRepo(true);
                 }
               }}
               autoFocus
@@ -1204,6 +1211,7 @@ export function StartWorkPage() {
         <ResourcePreview skills={enabledSkills} agents={enabledAgents} assistants={instructionTargets} tagCount={selectedTags.length} />
 
         {submitError && <p role="alert" className="text-sm text-destructive">{submitError}</p>}
+        {askedWithoutRepo && selectedRepos.length === 0 && <p role="alert" className="text-sm text-destructive">Choose a repository first, then create the workspace.</p>}
 
         {/* Pinned so Create stays in reach however long the skills list is. */}
         <div className="sticky bottom-0 z-10 flex items-center justify-between gap-4 border-t border-border bg-background/95 py-3 backdrop-blur">
