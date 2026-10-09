@@ -53,6 +53,37 @@ describe('generateContextFiles with Pi harness', () => {
     expect(knowledgeMd).toContain('Testing workspace creation with Pi assistant');
   });
 
+  it('writes clean context files for a workspace created without a description', async () => {
+    const ctx: WorkspaceContext = {
+      feature: {
+        id: 'no-description-feature',
+        branchName: 'no-description-feature',
+        name: 'No description',
+        description: '',
+        repos: [],
+        assistants: ['claude'],
+        workspacePath: tempWorkspace,
+        createdAt: new Date().toISOString(),
+      },
+      repos: [],
+    };
+
+    await fs.writeFile(path.join(tempWorkspace, 'contextspace.json'), JSON.stringify(ctx.feature));
+    await generateContextFiles(ctx, ['claude'], tempWorkspace);
+
+    const agentsMd = await fs.readFile(path.join(tempWorkspace, 'AGENTS.md'), 'utf-8');
+    const workspaceMd = await fs.readFile(path.join(tempWorkspace, 'WORKSPACE.md'), 'utf-8');
+    const knowledgeMd = await fs.readFile(path.join(tempWorkspace, 'contextspace-knowledge.md'), 'utf-8');
+
+    // No blank paragraph where the description would have been, and no placeholder in its place.
+    expect(agentsMd).toMatch(/# no-description-feature\n\n[^\n]/);
+    expect(workspaceMd).toMatch(/# Workspace: no-description-feature\n\n> Assistant context lives/);
+    expect(knowledgeMd).not.toContain('## Feature Goal');
+    for (const content of [agentsMd, workspaceMd, knowledgeMd]) {
+      expect(content).not.toContain('undefined');
+    }
+  });
+
   it('supports combining pi with other assistants like claude', async () => {
     const ctx: WorkspaceContext = {
       feature: {
