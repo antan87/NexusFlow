@@ -195,14 +195,49 @@ describe('Harness Abstraction Layer', () => {
 
     it('correctly sets hasApiKeyFallback for Codex when auth.json exists (Issue #172)', async () => {
       const codexAdapter = getAdapter('codex');
-      // If no API key and no auth.json in temp dir
-      const unauthStatus = await codexAdapter.authStatus(undefined, {
-        OPENAI_API_KEY: '',
-        CODEX_API_KEY: '',
-        CODEX_HOME: '/non-existent-dir',
-      });
-      // Should cleanly compute method
-      expect(unauthStatus.hasApiKeyFallback).toBeFalsy();
+      const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'cs-codex-home-'));
+      const emptyHome = await fs.mkdtemp(path.join(os.tmpdir(), 'cs-codex-empty-'));
+      try {
+        await fs.writeFile(path.join(codexHome, 'auth.json'), '{}');
+
+        // API key AND a ChatGPT sign-in file: a second credential sits behind the key.
+        const withBoth = await codexAdapter.authStatus(undefined, {
+          OPENAI_API_KEY: 'sk-test',
+          CODEX_HOME: codexHome,
+        });
+        expect(withBoth.method).toBe('api-key');
+        expect(withBoth.hasApiKeyFallback).toBe(true);
+
+        // API key only: nothing behind it, so no fallback.
+        const keyOnly = await codexAdapter.authStatus(undefined, {
+          OPENAI_API_KEY: 'sk-test',
+          CODEX_HOME: emptyHome,
+        });
+        expect(keyOnly.method).toBe('api-key');
+        expect(keyOnly.hasApiKeyFallback).toBe(false);
+
+        // Sign-in file only: authenticated, and the key is not a fallback for anything.
+        const signInOnly = await codexAdapter.authStatus(undefined, {
+          OPENAI_API_KEY: '',
+          CODEX_API_KEY: '',
+          CODEX_HOME: codexHome,
+        });
+        expect(signInOnly.configured).toBe(true);
+        expect(signInOnly.method).toBe('chatgpt-signin');
+        expect(signInOnly.hasApiKeyFallback).toBe(false);
+
+        // Neither: unauthenticated.
+        const neither = await codexAdapter.authStatus(undefined, {
+          OPENAI_API_KEY: '',
+          CODEX_API_KEY: '',
+          CODEX_HOME: emptyHome,
+        });
+        expect(neither.configured).toBe(false);
+        expect(neither.hasApiKeyFallback).toBeFalsy();
+      } finally {
+        await fs.rm(codexHome, { recursive: true, force: true });
+        await fs.rm(emptyHome, { recursive: true, force: true });
+      }
     });
 
     it('throws AuthRequiredError on start() if unauthenticated', async () => {
