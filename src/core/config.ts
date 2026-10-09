@@ -10,6 +10,7 @@ import chalk from 'chalk';
 
 import type { NexusFlowConfig } from '../types.js';
 import { getStorageProvider, setActiveStorageProvider } from './adapters/registry.js';
+import { toPersistedConfig } from './config-schema.js';
 import { debugLog } from '../utils/debug.js';
 
 /**
@@ -154,9 +155,11 @@ export async function loadConfig(options: { quiet?: boolean } = {}): Promise<Nex
  * Persists the given configuration to ~/.nexusflow/config.json.
  * Creates the config directory if it doesn't exist.
  *
- * @param config - The configuration to save.
+ * @param config - The configuration to save. Keys that are not part of
+ *   `NexusFlowConfig` are dropped, so a stray key never lands in the file.
  */
 export async function saveConfig(config: NexusFlowConfig): Promise<void> {
+  config = toPersistedConfig(config);
   await ensureConfigDir();
 
   const configDir = path.resolve(getConfigDir());

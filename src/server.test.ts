@@ -1192,6 +1192,92 @@ describe('Server API Endpoints Unit Tests', () => {
     });
   });
 
+  describe('POST /api/config saves only the settings the app edits', () => {
+    const post = (body: unknown) => app.request('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const stored = {
+      version: '1.0.0',
+      devDir: '/old/dev',
+      workspacesDir: '/old/ws',
+      defaultAssistant: null,
+      scanDepth: 2,
+      excludePatterns: ['node_modules'],
+      plugins: ['/home/me/plugins/mine.mjs'],
+      lastUpdateCheck: '2026-01-01T00:00:00.000Z',
+      latestVersion: '1.0.0',
+      latestDownloadUrl: 'https://example.com/stored',
+      latestReleaseNotes: 'stored notes',
+    };
+    const savedConfig = () => vi.mocked(config.saveConfig).mock.calls[0][0] as unknown as Record<string, unknown>;
+
+    beforeEach(() => {
+      vi.spyOn(config, 'loadConfig').mockResolvedValue({ ...stored } as any);
+      vi.spyOn(config, 'saveConfig').mockResolvedValue();
+    });
+
+    it('does not store a key that is not part of the config', async () => {
+      const response = await post({ devDir: '/old/dev', workspacesDir: '/old/ws', somethingUnknown: 'value', nested: { a: 1 } });
+      expect(response.status).toBe(200);
+      expect(savedConfig()).not.toHaveProperty('somethingUnknown');
+      expect(savedConfig()).not.toHaveProperty('nested');
+      expect((await response.json()).config).not.toHaveProperty('somethingUnknown');
+    });
+
+    it('keeps the stored value for settings the app does not edit, whatever the request says', async () => {
+      const response = await post({
+        devDir: '/old/dev',
+        workspacesDir: '/old/ws',
+        version: '9.9.9',
+        excludePatterns: ['changed'],
+        plugins: ['/tmp/other.mjs'],
+        lastUpdateCheck: '2030-01-01T00:00:00.000Z',
+        latestVersion: '9.9.9',
+        latestDownloadUrl: 'https://example.com/changed',
+        latestReleaseNotes: 'changed notes',
+      });
+      expect(response.status).toBe(200);
+      expect(savedConfig()).toMatchObject({
+        version: stored.version,
+        excludePatterns: stored.excludePatterns,
+        plugins: stored.plugins,
+        lastUpdateCheck: stored.lastUpdateCheck,
+        latestVersion: stored.latestVersion,
+        latestDownloadUrl: stored.latestDownloadUrl,
+        latestReleaseNotes: stored.latestReleaseNotes,
+      });
+    });
+
+    it('still saves every setting the app edits when the GUI posts the whole config back', async () => {
+      const response = await post({
+        ...stored,
+        defaultAssistant: 'claude',
+        defaultEditor: 'code',
+        scanDepth: 4,
+        storageProvider: 'local',
+        adapterConfig: { local: { path: '/data' } },
+      });
+      expect(response.status).toBe(200);
+      expect(savedConfig()).toMatchObject({
+        devDir: '/old/dev',
+        workspacesDir: '/old/ws',
+        defaultAssistant: 'claude',
+        defaultEditor: 'code',
+        scanDepth: 4,
+        storageProvider: 'local',
+        adapterConfig: { local: { path: '/data' } },
+      });
+    });
+
+    it('still refuses an invalid value for a setting the app edits', async () => {
+      const response = await post({ scanDepth: 99 });
+      expect(response.status).toBe(400);
+      expect(config.saveConfig).not.toHaveBeenCalled();
+    });
+  });
+
   describe('GET /api/adapters', () => {
     it('should return all registered storage adapters with meta', async () => {
       const response = await app.request('/api/adapters');
