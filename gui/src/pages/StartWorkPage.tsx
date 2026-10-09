@@ -1223,11 +1223,11 @@ export function StartWorkPage() {
       {/* Pinned so Create stays in reach however long the skills list is, as a bar across the whole page with its
           contents lined up with the form. It sits flush with the bottom of the window: <main> in App.tsx pads its
           content by 12/20/24px and a sticky element respects that padding, so the bar reaches out by the same amount
-          (the negative offsets and margins) instead of leaving a strip of page showing under or beside it, and takes
-          the same amount back as padding so the button keeps its place. */}
+          (the negative offsets and margins) instead of leaving a strip of page showing under or beside it. Its own
+          padding is the same above and below the button, so the button sits in the middle of the bar. */}
       <div
         data-testid="create-footer"
-        className="sticky -bottom-3 z-10 -mx-3 mt-5 -mb-3 border-t border-border bg-background px-3 pt-3 pb-6 shadow-[0_-6px_10px_-8px_rgb(0_0_0/0.14)] sm:-bottom-5 sm:-mx-5 sm:-mb-5 sm:px-5 sm:pb-8 lg:-bottom-6 lg:-mx-6 lg:-mb-6 lg:px-6 lg:pb-9"
+        className="sticky -bottom-3 z-10 -mx-3 mt-5 -mb-3 border-t border-border bg-background px-3 py-3 shadow-[0_-6px_10px_-8px_rgb(0_0_0/0.14)] sm:-bottom-5 sm:-mx-5 sm:-mb-5 sm:px-5 lg:-bottom-6 lg:-mx-6 lg:-mb-6 lg:px-6"
       >
         <div className="mx-auto flex max-w-xl items-center justify-between gap-4">
           <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" title={selectedRepos.map((repo) => repo.name).join(', ')}>

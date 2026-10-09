@@ -851,6 +851,11 @@ test.describe('NexusFlow E2E GUI Tests', () => {
       // It runs the width of the page, not just the form column (36rem), and nothing sticks out sideways.
       expect(bar.width).toBeGreaterThan(Math.min(width - 40, 600));
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+      // The button sits in the middle of the bar: as much room above it as below, not pushed up by padding.
+      const button = (await page.getByRole('button', { name: 'Create workspace' }).boundingBox())!;
+      const above = button.y - bar.y;
+      const below = bar.y + bar.height - (button.y + button.height);
+      expect(Math.abs(above - below)).toBeLessThanOrEqual(2);
     });
   }
 
