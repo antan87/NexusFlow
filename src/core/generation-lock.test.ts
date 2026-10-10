@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as analysisCache from './analysis-cache.js';
-import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -86,19 +85,18 @@ describe('generation lock', () => {
     expect(await fs.readFile(path.join(workspacePath, 'AGENTS.md'), 'utf8')).toContain('with uncommitted changes');
   });
 
-  it('keeps generation usable when dirty files cannot be safely fingerprinted', async () => {
+  it('gives a repo with uncommitted files a real fingerprint on every platform, so generation never has to give up on it', async () => {
     await fs.writeFile(path.join(repoPath, 'README.md'), '# dirty\n');
     const snapshot = await captureGenerationSnapshot([
       { name: 'repo', path: repoPath, defaultBranch: 'main' },
     ]);
 
-    if (typeof constants.O_NOFOLLOW === 'number') {
-      expect(snapshot.repos.repo!.fingerprint).toContain('+');
-      expect(renderFreshnessBanner(snapshot)).not.toContain('CANNOT BE VERIFIED');
-    } else {
-      expect(snapshot.repos.repo!.fingerprint).toMatch(/^uncacheable:/);
-      expect(renderFreshnessBanner(snapshot)).toContain('CANNOT BE VERIFIED');
-    }
+    // Where the platform can open a file without following links the bytes are hashed; where it cannot
+    // (Windows) the file's size and timestamps are used instead. Either way there is a fingerprint, so
+    // the snapshot is never recorded as unreadable and the notice never has to say it cannot be verified.
+    expect(snapshot.repos.repo!.fingerprint).toContain('+');
+    expect(snapshot.repos.repo!.fingerprint).not.toMatch(/^uncacheable:/);
+    expect(renderFreshnessBanner(snapshot)).not.toContain('CANNOT BE VERIFIED');
   });
 
   it('reports an unverifiable same-revision snapshot without claiming known staleness', async () => {
