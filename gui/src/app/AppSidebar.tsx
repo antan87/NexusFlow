@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, type CSSProperties } from 'react';
 import {
   Menu as MenuIcon,
   FolderGit2,
@@ -47,12 +47,14 @@ import { liveText, runningFirst } from '../features/chat/liveSessions.js';
 import { LiveDot, LiveMarker } from '../features/chat/LiveMarker.js';
 import type { Feature, WorkspaceStatus } from '../types.js';
 import { RepositoriesPanel, RepositoriesToggle } from './WorkspaceRepositories.js';
+import { SidebarResizeHandle } from './SidebarResizeHandle.js';
 import { hasUnpreparedRepo } from '../features/worktrees/normalizeWorktrees.js';
 import { normalizeWorktreeGroups } from '../features/worktrees/normalizeWorktrees.js';
 import { hasBranchDrift } from '../features/worktrees/branchDrift.js';
 import { PrepareRepoDialog } from '../features/worktrees/PrepareRepoDialog.js';
 import { useWorkspaceRepositories } from '../lib/api/queries.js';
 import { useWorktreeNavigationState } from '../features/worktrees/worktreeStore.js';
+import { useSidebarWidth } from '../features/worktrees/sidebarWidth.js';
 
 export type WorkspaceSortOption =
   | 'created-desc'
@@ -149,6 +151,9 @@ function SidebarContents({
     else toggleSaved();
   }, [narrow, toggleSaved]);
   useEffect(() => { setNarrowExpanded(false); }, [pathname]);
+  // The width the person dragged it to. The rails and the narrow window keep their own, so it applies only to the full sidebar.
+  const { width: sidebarWidth, setWidth: setSidebarWidth, reset: resetSidebarWidth } = useSidebarWidth();
+  const [resizingSidebar, setResizingSidebar] = useState(false);
 
   // The sidebar is the only place that shows what each open chat is working on, so it reads that: while it is the
   // full sidebar (the rail shows no summaries) and the window is being looked at. A closed mobile sheet is not mounted.
@@ -403,9 +408,17 @@ function SidebarContents({
     );
   }
 
-  // ─── EXPANDED COCKPIT MODE (240px / w-60) ──────────────────────────────────
+  // ─── EXPANDED COCKPIT MODE (256px by default, w-64; the person can drag it wider) ──
   return (
-    <aside className="context-sidebar flex w-64 shrink-0 flex-col border-r border-border bg-card select-none h-screen overflow-hidden transition-[width] duration-200">
+    <>
+    <aside
+      className={cn(
+        'context-sidebar flex w-[min(var(--sidebar-width,16rem),45vw)] shrink-0 flex-col border-r border-border bg-card select-none h-screen overflow-hidden',
+        // It follows the pointer while dragged, and eases only when it changes any other way.
+        !resizingSidebar && 'transition-[width] duration-200',
+      )}
+      style={narrow ? undefined : ({ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties)}
+    >
       {/* Top Header */}
       <div className="flex h-11 items-center justify-between px-3 border-b border-border/60">
         <Link to="/overview" className="flex items-center gap-2 group">
@@ -826,6 +839,8 @@ function SidebarContents({
         </button>
       </div>
     </aside>
+    {!narrow && <SidebarResizeHandle width={sidebarWidth} onResize={setSidebarWidth} onReset={resetSidebarWidth} onDraggingChange={setResizingSidebar} />}
+    </>
   );
 }
 
