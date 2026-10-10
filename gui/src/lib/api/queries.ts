@@ -831,7 +831,13 @@ export function useAcknowledgeQuestions(wsId: string) {
 
 // ─── Repository safety & delivery ─────────────────────────────────────────
 
-/** Live per-repo state: edit boundary, branch, HEAD and changed files. */
+/**
+ * Live per-repo state: edit boundary, branch, HEAD and changed files. Re-read every 30 seconds while the
+ * window is visible (TanStack pauses it in a hidden tab), so a folder switched to another branch from a
+ * terminal or an editor is flagged soon after, not only when the window next gets focus.
+ */
+export const WORKSPACE_REPOSITORIES_POLL_MS = 30_000;
+
 export function useWorkspaceRepositories(wsId: string | null) {
   return useQuery({
     queryKey: ['workspace-repositories', wsId],
@@ -839,6 +845,7 @@ export function useWorkspaceRepositories(wsId: string | null) {
       `/api/workspace/${encodeURIComponent(wsId!)}/repositories`, { signal },
     )).repositories,
     enabled: Boolean(wsId),
+    refetchInterval: WORKSPACE_REPOSITORIES_POLL_MS,
   });
 }
 
